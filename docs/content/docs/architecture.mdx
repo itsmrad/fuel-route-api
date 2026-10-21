@@ -20,10 +20,10 @@ Internally the steps are three plain functions: `resolve(query) → {query, lat,
 
 | Stage | Cost | Notes |
 | --- | --- | --- |
-| OSRM route | 2–5 s | Public demo server. Dominates every cold request. |
+| OSRM route | ~1.4–1.7 s | Public demo server. Dominates every cold request. |
 | `stations_along` | 18–30 ms | Dallas → Chicago keeps 189 corridor stations, NYC → LA 447. |
 | Optimizer | 10–25 ms | O(n·F) DP: n corridor stations × 501 fuel levels. |
-| Cache hit | a few ms | No external calls, no recomputation. |
+| Cache hit | 7–30 ms | No external calls, no recomputation. |
 
 ## Decisions
 

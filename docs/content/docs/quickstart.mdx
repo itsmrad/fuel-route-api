@@ -44,7 +44,7 @@ curl -s 'http://127.0.0.1:8000/api/route/?start=Dallas,%20TX&finish=Chicago,%20I
 ```
 
 ```json
-{ "distance_miles": 925.4, "total_fuel_cost": 130.53, "stops": 2, "external_api_calls": 1 }
+{ "distance_miles": 961, "total_fuel_cost": 133.52, "stops": 2, "external_api_calls": 1 }
 ```
 
 Send it again: `external_api_calls` drops to `0` and the response comes back in milliseconds.
@@ -53,3 +53,7 @@ Send it again: `external_api_calls` drops to `0` and the response comes back in 
 </Steps>
 
 Or skip the terminal and use the [route planner](/docs/route-planner) or the [API playground](/docs/api/plan-route). Both call the same endpoint through the docs origin.
+
+## Postman
+
+Import [`postman_collection.json`](https://github.com/itsmrad/fuel-route-api/blob/main/postman_collection.json) from the repo root: 12 requests (routes, short trip, `stop_penalty=0`, `lat,lon`, free-text address, the three 400s, map page, spec), each with tests. The `baseUrl` variable defaults to `http://127.0.0.1:8000`; the collection also runs headless with `npx newman run postman_collection.json`.
