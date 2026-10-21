@@ -155,7 +155,7 @@ export function RoutePlanner() {
             title="Car routes with OSRM. Truck routes with Valhalla truck costing (trips up to 1,500 km; longer ones fall back to car)."
             className="flex h-12 items-center gap-1.5 rounded-xl border bg-fd-background px-3 transition-colors focus-within:border-fd-primary/60 focus-within:ring-2 focus-within:ring-fd-primary/20 md:w-32"
           >
-            <span className="text-[11px] uppercase tracking-wider text-fd-muted-foreground/80">Vehicle</span>
+            <span className="text-[11px] uppercase tracking-wider text-fd-muted-foreground">Vehicle</span>
             <select
               value={vehicle}
               onChange={(e) => setVehicle(e.target.value)}
@@ -224,7 +224,7 @@ function Field({
   onChange: (v: string) => void;
 }) {
   return (
-    <label className="group flex h-12 flex-1 items-center gap-2.5 rounded-xl border bg-fd-background px-3 transition-colors focus-within:border-fd-primary/60 focus-within:ring-2 focus-within:ring-fd-primary/20">
+    <label className="group flex h-12 items-center sm:flex-1 gap-2.5 rounded-xl border bg-fd-background px-3 transition-colors focus-within:border-fd-primary/60 focus-within:ring-2 focus-within:ring-fd-primary/20">
       <span className="text-fd-muted-foreground group-focus-within:text-fd-primary">{icon}</span>
       <span className="sr-only">{label}</span>
       <input
