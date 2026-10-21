@@ -50,8 +50,8 @@ function useDark() {
   );
 }
 
-function routeUrl(start: string, finish: string, penalty: string) {
-  const q = new URLSearchParams({ start, finish });
+function routeUrl(start: string, finish: string, penalty: string, vehicle: string) {
+  const q = new URLSearchParams({ start, finish, vehicle });
   if (penalty.trim()) q.set('stop_penalty', penalty.trim());
   return `/api/route/?${q}`;
 }
@@ -92,6 +92,7 @@ export function RoutePlanner() {
   const [finish, setFinish] = useState(PRESETS[1].finish);
   const [state, setState] = useState<State>({ phase: 'idle' });
   const [penalty, setPenalty] = useState('');
+  const [vehicle, setVehicle] = useState('car');
   const [focus, setFocus] = useState<{ i: number; at: number } | null>(null);
   const dark = useDark();
 
@@ -99,7 +100,7 @@ export function RoutePlanner() {
     setStart(s);
     setFinish(f);
     setFocus(null);
-    const url = routeUrl(s.trim(), f.trim(), penalty);
+    const url = routeUrl(s.trim(), f.trim(), penalty, vehicle);
     setState({ phase: 'loading', url });
     setState(await planRoute(url));
   }
@@ -149,6 +150,21 @@ export function RoutePlanner() {
               aria-label="Stop penalty in USD"
               className="tabular min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-fd-muted-foreground/70"
             />
+          </label>
+          <label
+            title="Car routes with OSRM. Truck routes with Valhalla truck costing (trips up to 1,500 km; longer ones fall back to car)."
+            className="flex h-12 items-center gap-1.5 rounded-xl border bg-fd-background px-3 transition-colors focus-within:border-fd-primary/60 focus-within:ring-2 focus-within:ring-fd-primary/20 md:w-32"
+          >
+            <span className="text-[11px] uppercase tracking-wider text-fd-muted-foreground/80">Vehicle</span>
+            <select
+              value={vehicle}
+              onChange={(e) => setVehicle(e.target.value)}
+              aria-label="Vehicle"
+              className="min-w-0 flex-1 bg-transparent text-[15px] outline-none"
+            >
+              <option value="car">Car</option>
+              <option value="truck">Truck</option>
+            </select>
           </label>
           <button
             type="submit"
@@ -282,6 +298,12 @@ function Result({
           <span className="rounded-full border px-2 py-0.5 font-mono tabular text-fd-muted-foreground">
             {n0.format(ms)} ms round trip
           </span>
+          {plan.routing && (
+            <span className="rounded-full border px-2 py-0.5 font-mono text-fd-muted-foreground">
+              {plan.routing.provider} · {plan.routing.profile}
+              {plan.routing.fallback ? ' (truck fallback)' : ''}
+            </span>
+          )}
           <span className="text-fd-muted-foreground">
             Fuel burned over the trip: <span className="tabular text-fd-foreground">{usdOrNa(plan.cost_of_fuel_consumed)}</span>
           </span>
@@ -440,7 +462,7 @@ function RouteSketch() {
           style={{ ['--len' as string]: 1, animation: 'route-draw 1.4s cubic-bezier(0.22,1,0.36,1) infinite' }}
         />
       </svg>
-      <span className="text-xs">Routing with OSRM, then optimizing stops…</span>
+      <span className="text-xs">Routing, then optimizing stops…</span>
     </div>
   );
 }

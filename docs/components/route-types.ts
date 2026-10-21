@@ -23,6 +23,7 @@ export interface RoutePlan {
   finish: Place;
   distance_miles: number;
   duration_hours: number;
+  routing: { provider: 'osrm' | 'valhalla'; profile: 'car' | 'truck'; fallback: boolean } | null;
   fuel_stops: FuelStop[];
   total_gallons_purchased: number;
   total_fuel_cost: number;
