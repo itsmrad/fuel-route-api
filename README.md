@@ -1,52 +1,108 @@
-# Fuel Route API
+<h1 align="center">Fuel Route API</h1>
 
-[![CI](https://github.com/itsmrad/fuel-route-api/actions/workflows/ci.yml/badge.svg)](https://github.com/itsmrad/fuel-route-api/actions/workflows/ci.yml)
+<p align="center">
+  Give it two US places. Get back the driving route, the cheapest fuel stops for a 500-mile-range, 10 MPG truck, and the total fuel cost.<br>
+  One external call per request, zero on a cache hit.
+</p>
 
-Django API: give it a start and finish in the USA, get back the driving route, the cost-optimal fuel stops for a 500-mile-range, 10 MPG truck, and the total fuel cost. One external call per request, zero on a cache hit.
+<p align="center">
+  <a href="https://github.com/itsmrad/fuel-route-api/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/itsmrad/fuel-route-api/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Django 6.1" src="https://img.shields.io/badge/Django-6.1-0C4B33?logo=django&logoColor=white">
+  <img alt="Python 3.14" src="https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white">
+  <img alt="uv" src="https://img.shields.io/badge/deps-uv-DE5FE9?logo=uv&logoColor=white">
+  <img alt="Tests 39" src="https://img.shields.io/badge/tests-39%20passing-2EA44F">
+</p>
 
-Live docs and demo: (deployment URL — added in deploy step)
+<p align="center">
+  <a href="docs/content/docs/index.mdx"><b>Docs</b></a> ·
+  <a href="docs/content/docs/route-planner.mdx"><b>Route Planner</b></a> ·
+  <a href="docs/content/docs/api/plan-route.mdx"><b>API Reference</b></a> ·
+  <a href="docs/content/docs/engineering-decisions.mdx"><b>Engineering decisions</b></a> ·
+  <a href="postman_collection.json"><b>Postman collection</b></a>
+</p>
 
-## Assignment requirements
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/route-planner-light.webp">
+    <img alt="Route planner: New York to Los Angeles, 2,810 mi, 7 fuel stops, $702.79, served from cache in 49 ms" src=".github/assets/route-planner-dark.webp" width="900">
+  </picture>
+</p>
 
-| Requirement | How it is met | Where |
+> **Live demo:** (added after deployment). Until then, run it locally with `docker compose up` and open http://localhost:3000/docs.
+
+## Results at a glance
+
+| Metric | Result |
+| --- | --- |
+| **Cold request** (1 OSRM call) | p50 **421 ms** · p95 838 ms |
+| **Cached request** (0 external calls) | p50 **9.5 ms** · p95 23 ms |
+| **External calls** | **1** cold · **0** cached or on a `stop_penalty` change |
+| **Savings vs a naive driver** | **12.3% ($382.77)** cheaper over 12 US routes ($2,718.99 vs $3,101.76) |
+| **Stations placed offline** | **97.2%** (6,443 of 6,626 US stations), 0 geocoding calls at request time |
+| **Tests** | **39** passing, no network (routing providers mocked) |
+
+Measured with `manage.py benchmark` on 12 routes (196 to 3,304 mi), gunicorn `-w 2 --threads 4 -k gthread`, dev laptop against public OSRM. Details: [benchmarks](docs/content/docs/benchmarks.mdx).
+
+## Requirements → how they're met
+
+| Requirement | How | Evidence |
 | --- | --- | --- |
-| Start and finish within the USA | `"City, ST"` and `"lat,lon"` resolve locally against the Census Gazetteer; other text falls back to Nominatim. Non-US input is a 400. | `api/routing/geo.py` |
-| Return a map of the route | `map_url` in every response opens a Leaflet page with the route and numbered stops; the GeoJSON line is also in the JSON. | `/api/route/map/`, `templates/routing/map.html` |
-| Optimal fuel stops, cost-effective by price | Dynamic program over (station, fuel level): minimises fuel cost plus a per-stop penalty. | `api/routing/optimizer.py` |
-| 500-mile range, multiple stops | Range is a hard constraint; stops are chosen along the whole route. Gaps over 500 mi return 422. | `optimizer.py` |
-| Total money spent at 10 MPG | `total_fuel_cost` (fuel bought on the way) and `cost_of_fuel_consumed` (all fuel used). Money math in `Decimal`. | `optimizer.py` |
-| Use the provided price file | Deduplicated and geocoded once by `manage.py load_stations`. | `api/data/fuel-prices.csv` |
-| Free routing API, few calls | OSRM public server, one call returns geometry, distance and duration. `vehicle=truck` uses Valhalla truck costing (opt-in, see Limits). | `geo.get_route` |
-| Fast | Cold p50 421 ms (almost all OSRM), cached p50 9.5 ms. | see Performance |
-| Latest Django | Django 6.1, plain `JsonResponse`, no DRF. | `api/pyproject.toml` |
+| Django, latest stable | Django 6.1.2, plain `JsonResponse`, no DRF | [`api/pyproject.toml`](api/pyproject.toml) |
+| Start and finish in the USA | `"City, ST"` and `"lat,lon"` resolve locally (Census Gazetteer); other text falls back to Nominatim; non-US input → `400` | [`geo.py`](api/routing/geo.py) |
+| Map of the route | `map_url` in every response (Leaflet page, numbered stops); GeoJSON line in the JSON; interactive planner in the docs | [map template](api/routing/templates/routing/map.html), [planner](docs/content/docs/route-planner.mdx) |
+| Cost-effective fuel stops | DP over (station, fuel level) minimising fuel cost + `$15` per stop; checked against brute force | [`optimizer.py`](api/routing/optimizer.py), [optimizer docs](docs/content/docs/optimizer.mdx) |
+| 500-mile range, multiple stops | Range is a hard constraint across the whole route; a gap over 500 mi → `422` | [`test_optimizer.py`](api/routing/test_optimizer.py) |
+| Total cost at 10 MPG | `total_fuel_cost` (bought on the way) and `cost_of_fuel_consumed`; money in `Decimal` | [`optimizer.py`](api/routing/optimizer.py) |
+| Use the provided price CSV | Deduplicated and geocoded once by `load_stations` | [`fuel-prices.csv`](api/data/fuel-prices.csv), [data docs](docs/content/docs/data.mdx) |
+| Free map/routing API | OSRM public server (no key); keyless OSM-based tiles (CARTO on the map page, OpenFreeMap in the planner) | [architecture](docs/content/docs/architecture.mdx) |
+| 1 routing call (2–3 ok) | 1 typical, 0 cached; worst case 3 (truck → Valhalla, then OSRM, then FOSSGIS OSRM); reported as `external_api_calls` | [`test_views.py`](api/routing/test_views.py) |
+| Fast | Cold p50 421 ms (mostly OSRM), cached p50 9.5 ms | [benchmarks](docs/content/docs/benchmarks.mdx) |
+| Postman demo | 12 requests with assertions | [`postman_collection.json`](postman_collection.json) |
+
+## How it works
+
+```mermaid
+flowchart TD
+    Q["GET /api/route/?start=…&finish=…"] --> R["<b>Resolve</b> start + finish<br>local lookup · 0 calls"]
+    R --> C{"Route cached?<br>key: coords + vehicle"}
+    C -- miss --> OS["<b>Route</b> · 1 call<br>OSRM polyline6, FOSSGIS fallback"]
+    OS --> G["<b>Corridor match</b><br>grid index · within 10 mi"]
+    G --> S[("File cache")]
+    C -- hit --> O
+    G --> O["<b>Optimize</b><br>DP: fuel cost + $15/stop"]
+    O --> J["JSON response + map_url"]
+```
+
+The cache key is the resolved coordinates and vehicle, not the raw text, so a respelled city or a new `stop_penalty` re-runs only the optimizer (~9 ms, 0 calls). See [architecture](docs/content/docs/architecture.mdx) and [engineering decisions](docs/content/docs/engineering-decisions.mdx).
 
 ## Quickstart
 
-With Docker: `docker compose up` → docs and route planner on http://localhost:3000, API on http://localhost:8000 (first build ~5 min; the image ships with the station data loaded).
-
-Without Docker: needs [uv](https://docs.astral.sh/uv/) (installs Python 3.14 itself) and Node 20+ for the docs.
+**Docker** (first build takes a few minutes; the image ships with stations loaded):
 
 ```bash
-# API on http://127.0.0.1:8000
-cd api && uv sync && uv run python manage.py migrate && uv run python manage.py load_stations && uv run python manage.py runserver
+docker compose up    # docs + route planner on :3000, API on :8000
+```
+
+**Local** (needs [uv](https://docs.astral.sh/uv/), which installs Python 3.14, and Node 20+):
+
+```bash
+# API on http://127.0.0.1:8000 (manage.py turns DEBUG on for local dev)
+cd api && uv sync && uv run python manage.py migrate
+uv run python manage.py load_stations   # downloads the Census Gazetteer once, prints "matched: 6443 (97.2%)"
+uv run python manage.py runserver
 
 # Docs + route planner on http://localhost:3000 (proxies /api/* to :8000)
 cd docs && npm install && npm run dev
 ```
 
-`load_stations` downloads the Census Gazetteer once (~10 s) and prints coverage: `matched: 6443 (97.2%)`.
-
-Postman: import [`postman_collection.json`](postman_collection.json) (12 requests with tests; `baseUrl` defaults to `http://127.0.0.1:8000`).
-
-## API
-
-`GET /api/route/?start=<loc>&finish=<loc>[&stop_penalty=<usd>][&vehicle=car|truck]` · `GET /api/route/map/?…` (HTML) · `GET /api/openapi.yaml` (OpenAPI 3.1)
+**Try it:**
 
 ```bash
 curl -s 'http://127.0.0.1:8000/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL'
 ```
 
-Real response, route coordinates trimmed:
+<details>
+<summary>Real response (route coordinates trimmed)</summary>
 
 ```json
 {
@@ -71,85 +127,77 @@ Real response, route coordinates trimmed:
 }
 ```
 
-Errors are JSON `{"error", "detail"}`: `400` missing/invalid parameter or unknown/non-US location, `422` a gap longer than 500 mi with no station, `502` routing provider down.
+</details>
 
-Assumption: the truck starts with a full tank, so `total_fuel_cost` is fuel bought on the way (0 for trips under 500 mi); `cost_of_fuel_consumed` prices every gallon burned.
+The truck starts with a full tank, so `total_fuel_cost` is fuel bought on the way (0 for trips under 500 mi); `cost_of_fuel_consumed` prices every gallon burned.
 
-## How it works
+**Tests:** `cd api && uv run python manage.py test` · **Postman:** import [`postman_collection.json`](postman_collection.json) (`baseUrl` defaults to `http://127.0.0.1:8000`).
 
-1. **Resolve** start and finish: Census table or `lat,lon` locally (0 calls), else Nominatim (+1 each).
-2. **Route** with OSRM `/route/v1/driving`: 1 call, full geometry. `vehicle=truck`: Valhalla `costing=truck` (Class 8: 4.11 m, 2.6 m, 21.64 m, 36.3 t); on failure or over the public server's 1,500 km cap, OSRM car with `routing.fallback: true`. OSRM demo server down or slow: one call to the FOSSGIS OSRM server (`fallback: true`). No retries; each call is cut off after 8 s wall clock, so a dead or slow provider costs at most 8 s.
-3. **Corridor match**: in-memory 0.5° grid index keeps stations within 10 mi of the polyline, each with a mile marker.
-4. **Optimize** stops (below).
-5. **Respond**. The route (distance, line, corridor) is cached on the vehicle and resolved coordinates, so another spelling or `stop_penalty` re-runs only the optimizer; the map page reads the same entry.
+## API
 
-External call budget: **1** typical, **0** cached; worst case ≤ 3 routing calls (Valhalla, OSRM demo, FOSSGIS) plus 1 per Nominatim lookup. Reported per response as `external_api_calls`.
-
-## Optimizer
-
-Minimises **fuel cost + `stop_penalty` × stops** (default **$15**, about 30 min of driver time) with a DP over (station, fuel on arrival in whole miles, 0–500): O(n · 501). With `stop_penalty=0` the classic greedy ("fill up if nothing cheaper is in range, else buy just enough to reach the cheaper one") is already optimal; the DP exists because free stops make greedy chase cents.
-
-| NYC → LA | Stops | Fuel cost |
+| Endpoint | Parameters | Returns |
 | --- | --- | --- |
-| `stop_penalty=0` | 16 | $698.92 |
-| default ($15) | **7** | **$702.79** |
+| `GET /api/route/` | `start`, `finish` (required: `"City, ST"`, `"lat,lon"`, or free text via Nominatim) · `stop_penalty` (USD ≥ 0, default `15`; `0` = cheapest fuel) · `vehicle` (`car` default, or `truck` via Valhalla) | Route, fuel stops, costs, `routing`, `map_url`, `external_api_calls` |
+| `GET /api/route/map/` | same | HTML map of the route and stops |
+| `GET /api/openapi.yaml` | | OpenAPI 3.1 spec |
 
-Nine fewer stops for +$3.87. The penalty only steers the choice; it is never added to `total_fuel_cost`. Tests check the DP against brute force.
+Errors are JSON `{"error", "detail"}`: `400` missing/invalid parameter or unknown/non-US location · `422` fuel gap over 500 mi or no road · `502` routing provider down or slow. Full reference: [API docs](docs/content/docs/api/plan-route.mdx), [errors](docs/content/docs/errors.mdx).
 
-## Performance
+## Tech stack
 
-12 US routes (196 to 3,304 mi), gunicorn `-w 2 --threads 4 -k gthread`, from a dev laptop against public OSRM (`manage.py benchmark`):
-
-| Cold (1 OSRM call) p50 / p95 | Cached p50 / p95 | `stop_penalty` change p50 / p95 | Cached compute (DP p50) |
-| --- | --- | --- | --- |
-| 421 / 838 ms | 9.5 / 23 ms | 9.4 / 23 ms, 0 calls | 9.1 ms (6.6 ms) |
-
-Against a naive fill-when-low driver, the optimizer spends 12.3% less on fuel ($2,718.99 vs $3,101.76, 31 vs 29 stops). Details: [docs/content/docs/benchmarks.mdx](docs/content/docs/benchmarks.mdx).
-
-## Data and geocoding
-
-The CSV has no coordinates and addresses like `I-44, EXIT 283 & US-69`. `load_stations` dedupes 8,151 rows to 6,738 stations, keeps **6,626 US** ones, and places **97.2%** (6,443) at their city centroid via the US Census 2024 Gazetteer (places + county subdivisions, name normalization, consolidated-city aliases). Unmatched rows are logged and dropped.
-
-- **Address geocoding (one-time)**: `manage.py geocode_stations` sent the 5,000 highest-priority of 6,075 unique addresses to the Geoapify batch API (~2,600 of the 3,000 free daily credits) and kept a hit only if it was street-level or better, shared a number with the address and sat within 25 mi of the city centroid. Result, committed as `api/data/station_coords.csv` (no key needed): **741 stations (11.5%)** moved off the centroid, median 1.7 mi, p90 5.0 mi. Most addresses (`I-55, EXIT 180`) only resolve to the city.
-- **Impact is nil on plans**: corridor stations Dallas → Chicago 189 → 187, NYC → LA 447 → 448, Miami → Seattle 382 → 382; total cost and stops unchanged ($133.52/2, $702.79/7, $853.01/8). The 10-mile corridor already absorbs the centroid error.
-- **California gap**: only 8 CA stations, all near the Mexican border, so NYC → LA has no station for its last ~273 mi (fine within range, fewer choices out West).
-
-## Tests
-
-```bash
-cd api && uv run python manage.py test   # 39 tests, no network (OSRM/Valhalla mocked)
-```
-
-Optimizer cases (cheap-ahead, fill-up, short trip, unreachable gap, exact cents, DP vs brute force), geocoding, and the endpoint (asserts 1 external call, then 0 on repeat).
-
-## Layout
-
-```
-api/                     Django project (uv)
-  config/                settings, urls
-  routing/
-    geo.py               resolve location, OSRM client, stations along route
-    optimizer.py         plan_fuel_stops() DP
-    views.py             /api/route/, /api/route/map/, /api/openapi.yaml
-    management/commands/load_stations.py, geocode_stations.py, benchmark.py
-    templates/routing/map.html
-    test_*.py
-  data/fuel-prices.csv, station_coords.csv
-  openapi.yaml           OpenAPI 3.1 spec (served at /api/openapi.yaml)
-docs/                    Fumadocs (Next.js): guides, route planner, API reference
-postman_collection.json
-plan.md                  design notes
-```
-
-## Limits and upgrade path
-
-| Limit | Upgrade |
+| Layer | Choice |
 | --- | --- |
-| Most stations at city centroid (11.5% address-geocoded) | Exit-number lookup for `I-xx, EXIT nn` addresses (OSM `motorway_junction`) |
-| Public OSRM servers (best-effort, ~1 req/s; FOSSGIS is the fallback) | Self-hosted OSRM or OpenRouteService; one-function swap in `get_route` |
-| Truck routing opt-in: public Valhalla caps trips at 1,500 km, so coast-to-coast falls back to OSRM car | Self-hosted Valhalla, then default `vehicle=truck` |
-| Sparse West Coast data | Fuller price feed; optimizer unchanged |
-| Price snapshot | Scheduled `load_stations` from a live feed |
-| File cache, one box | Redis when there is more than one box |
-| In-memory grid index | PostGIS + GiST past a few hundred thousand stations |
-| Fixed 500 mi / 10 MPG, full tank at start | `range`, `mpg`, `start_fuel` query parameters |
+| API | Django 6.1, Python 3.14, uv, `requests`, gunicorn (gthread) |
+| Data | SQLite + in-memory grid index; Census 2024 Gazetteer for station coordinates |
+| Routing | OSRM public (car), FOSSGIS OSRM fallback, Valhalla public (opt-in truck) |
+| Cache | Django `FileBasedCache`, shared across gunicorn workers |
+| Docs | Next.js 16, Fumadocs, OpenAPI playground, MapLibre + OpenFreeMap |
+| Ops | Docker Compose, GitHub Actions CI |
+
+**Deliberately not used:**
+- **DRF**: one read-only endpoint; `JsonResponse` + an OpenAPI file is enough.
+- **PostGIS**: 6,626 points fit a stdlib grid index that matches a corridor in ~5 ms.
+- **Redis / Celery**: one box, no background work; the file cache is shared across workers.
+- **Keyed routing APIs** (ORS, GraphHopper, HERE): rate-limited or need an account; OSRM needs neither.
+- **Request-time geocoding**: stations are placed offline once, so requests never wait on a geocoder.
+
+## Repository layout
+
+```
+api/                         Django project (uv)
+  config/                    settings, urls, wsgi (warms indexes at startup)
+  routing/
+    geo.py                   location resolver, OSRM/Valhalla client, corridor match
+    optimizer.py             plan_fuel_stops(): stop-penalty DP
+    views.py                 /api/route/, /api/route/map/, /api/openapi.yaml
+    management/commands/     load_stations, geocode_stations, benchmark
+    test_*.py                39 tests
+  data/                      fuel-prices.csv, station_coords.csv
+  openapi.yaml               OpenAPI 3.1 spec
+docs/                        Fumadocs site: guides, route planner, API reference
+postman_collection.json      12 requests with assertions
+compose.yaml                 docker compose up → :3000 + :8000
+```
+
+## Limits and next steps
+
+- **Station precision:** most stations sit at their city centroid (11.5% address-geocoded). The 10-mile corridor absorbs this (plans were unchanged after geocoding); next is exit-number lookup for `I-xx, EXIT nn` addresses.
+- **Public routing servers** are best-effort and rate-limited; self-hosted OSRM is a one-function swap in `get_route`.
+- **Truck routing is opt-in:** public Valhalla caps trips at 1,500 km, so coast-to-coast falls back to OSRM car. Self-hosted Valhalla would make `truck` the default.
+- **Sparse West Coast data:** only 8 California stations, so NYC → LA has no station for its last ~273 mi (still within range).
+- **Fixed assumptions:** 500 mi, 10 MPG, full tank at start, price snapshot. `range`, `mpg` and `start_fuel` parameters and a scheduled price refresh are straightforward additions.
+- **Single box:** file cache and in-memory index; Redis and PostGIS when there is more than one box or many more stations.
+
+## Further reading
+
+Docs site: run locally at http://localhost:3000/docs. Source pages:
+[Overview](docs/content/docs/index.mdx) ·
+[Quickstart](docs/content/docs/quickstart.mdx) ·
+[Architecture](docs/content/docs/architecture.mdx) ·
+[Optimizer](docs/content/docs/optimizer.mdx) ·
+[Data & geocoding](docs/content/docs/data.mdx) ·
+[Engineering decisions](docs/content/docs/engineering-decisions.mdx) ·
+[Benchmarks](docs/content/docs/benchmarks.mdx) ·
+[Deployment](docs/content/docs/deployment.mdx) ·
+[Limits](docs/content/docs/limits.mdx) ·
+[Errors](docs/content/docs/errors.mdx)
