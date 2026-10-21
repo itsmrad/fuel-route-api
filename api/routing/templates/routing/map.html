@@ -10,7 +10,7 @@
   html, body { margin: 0; height: 100%; }
   body { display: flex; flex-direction: column; font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
   form { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; background: #1b1b1b; border-bottom: 1px solid #333; }
-  input { flex: 1 1 160px; padding: 8px; border: 1px solid #444; border-radius: 6px; background: #222; color: inherit; font: inherit; }
+  input, select { flex: 1 1 160px; padding: 8px; border: 1px solid #444; border-radius: 6px; background: #222; color: inherit; font: inherit; }
   button { padding: 8px 16px; border: 0; border-radius: 6px; background: #2f80ed; color: #fff; font: inherit; cursor: pointer; }
   #map { flex: 1; min-height: 300px; }
   .panel { position: absolute; z-index: 1000; left: 12px; bottom: 24px; max-width: calc(100% - 24px); padding: 10px 14px;
@@ -26,6 +26,7 @@
   <input name="start" placeholder="Start, e.g. Dallas, TX" value="{{ request.GET.start }}" required aria-label="Start">
   <input name="finish" placeholder="Finish, e.g. Chicago, IL" value="{{ request.GET.finish }}" required aria-label="Finish">
   <input name="stop_penalty" type="number" min="0" step="any" placeholder="$/stop ({{ default_penalty }})" value="{{ request.GET.stop_penalty }}" aria-label="Stop penalty in USD" style="flex: 0 1 120px">
+  <select name="vehicle" aria-label="Vehicle" style="flex: 0 1 140px"><option value="car">Car (OSRM)</option><option value="truck"{% if request.GET.vehicle == 'truck' %} selected{% endif %}>Truck (Valhalla)</option></select>
   <button>Plan route</button>
 </form>
 {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}

@@ -12,6 +12,8 @@ COORDS = [[-96.8 + i * 0.054, 32.78] for i in range(201)]  # ~630 mi due east of
 OSRM_OK = {'code': 'Ok', 'routes': [{'geometry': {'coordinates': COORDS}, 'distance': 630 * 1609.344, 'duration': 9 * 3600}]}
 PLACES = {('TX', 'dallas'): (32.78, -96.8), ('MS', 'east'): (32.78, -86.0)}
 URL = '/api/route/?start=Dallas, TX&finish=East, MS'
+SHAPE = '_p~iF~ps|U_ulLnnqC_mqNvxq`@'  # Google's polyline example, read at 1e-6
+VALHALLA_OK = {'trip': {'legs': [{'shape': SHAPE}], 'summary': {'length': 300.0, 'time': 5 * 3600}}}
 LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 
 
@@ -43,6 +45,47 @@ class RouteApiTests(TestCase):
         with patch('routing.geo.http.get', side_effect=fake_get(osrm)) as get:
             return self.client.get(url), get
 
+    def truck(self, valhalla, url=URL + '&vehicle=truck'):
+        post = MagicMock(side_effect=valhalla) if isinstance(valhalla, Exception) else MagicMock()
+        post.return_value.json.return_value = valhalla
+        with patch('routing.geo.http.post', post):
+            r, get = self.get(url)
+        return r, post.call_count + get.call_count
+
+    def test_truck_uses_valhalla(self, *_):
+        r, calls = self.truck(VALHALLA_OK)
+        body = r.json()
+        self.assertEqual((r.status_code, calls, body['external_api_calls']), (200, 1, 1))
+        self.assertEqual(body['routing'], {'provider': 'valhalla', 'profile': 'truck', 'fallback': False})
+        self.assertEqual((body['distance_miles'], body['duration_hours']), (300.0, 5.0))
+        self.assertEqual(body['route']['coordinates'], [[-12.02, 3.85], [-12.095, 4.07], [-12.6453, 4.3252]])
+        self.assertTrue(body['map_url'].endswith('&vehicle=truck'))
+
+    def test_truck_falls_back_to_osrm(self, *_):
+        for valhalla in (requests.ConnectionError('boom'), {'error_code': 154, 'error': 'too far'}):
+            cache.clear()
+            r, calls = self.truck(valhalla)
+            self.assertEqual((r.status_code, calls, r.json()['external_api_calls']), (200, 2, 2))
+            self.assertEqual(r.json()['routing'], {'provider': 'osrm', 'profile': 'car', 'fallback': True})
+            self.assertEqual(r.json()['distance_miles'], 630.0)
+
+    def test_truck_over_public_cap_skips_valhalla(self, *_):
+        r, calls = self.truck(AssertionError('not called'), '/api/route/?start=Dallas, TX&finish=47.6,-122.3&vehicle=truck')
+        self.assertEqual((calls, r.json()['external_api_calls'], r.json()['routing']['fallback']), (1, 1, True))
+
+    def test_truck_no_path(self, *_):
+        r, _ = self.truck({'error_code': 442, 'error': 'No path could be found for input'})
+        self.assertEqual((r.status_code, r.json()['error']), (422, 'no_route'))
+
+    def test_vehicle_in_cache_key(self, *_):
+        self.assertEqual(self.get()[1].call_count, 1)
+        self.assertEqual(self.truck(VALHALLA_OK)[1], 1)  # car route cached, truck still routes
+        self.assertEqual(self.truck(VALHALLA_OK)[1], 0)
+        r, get = self.get(URL + '&vehicle=car')
+        self.assertEqual((get.call_count, r.json()['distance_miles']), (0, 630.0))
+        r, _ = self.get(URL + '&vehicle=bike')
+        self.assertEqual((r.status_code, r.json()['error']), (400, 'invalid_parameter'))
+
     def test_happy_path_then_cache_hit(self, *_):
         r, get = self.get()
         self.assertEqual(r.status_code, 200)
@@ -50,7 +93,8 @@ class RouteApiTests(TestCase):
         body = r.json()
         self.assertEqual(set(body), {'start', 'finish', 'distance_miles', 'duration_hours', 'fuel_stops',
                                      'total_gallons_purchased', 'total_fuel_cost', 'cost_of_fuel_consumed',
-                                     'stop_penalty', 'route', 'map_url', 'external_api_calls'})
+                                     'stop_penalty', 'route', 'map_url', 'external_api_calls', 'routing'})
+        self.assertEqual(body['routing'], {'provider': 'osrm', 'profile': 'car', 'fallback': False})
         self.assertEqual(body['start'], {'query': 'Dallas, TX', 'lat': 32.78, 'lon': -96.8})
         self.assertEqual((body['distance_miles'], body['duration_hours'], body['external_api_calls']), (630.0, 9.0, 1))
         self.assertEqual([s['name'] for s in body['fuel_stops']], ['S0', 'S1'])
@@ -59,7 +103,7 @@ class RouteApiTests(TestCase):
         self.assertAlmostEqual(body['total_fuel_cost'], sum(s['cost'] for s in body['fuel_stops']), delta=0.01)
         self.assertEqual(body['route']['type'], 'LineString')
         self.assertEqual(body['route']['coordinates'][-1], COORDS[-1])
-        self.assertEqual(body['map_url'], 'http://testserver/api/route/map/?start=Dallas%2C+TX&finish=East%2C+MS&stop_penalty=15.0')
+        self.assertEqual(body['map_url'], 'http://testserver/api/route/map/?start=Dallas%2C+TX&finish=East%2C+MS&stop_penalty=15.0&vehicle=car')
 
         r, get = self.get('/api/route/?start= dallas , tx &finish=EAST,MS')
         self.assertEqual(get.call_count, 0)

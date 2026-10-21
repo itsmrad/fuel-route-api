@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.cache.backends.base import DEFAULT_TIMEOUT
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -16,16 +17,17 @@ RANGE_MILES = 500
 MAX_ROUTE_POINTS = 5000  # ~104 KB response for NYC->LA
 
 
-def leg(start, finish):
-    """(route, OSRM calls made). Cached on resolved coords, so spelling and stop_penalty never re-call OSRM."""
+def leg(start, finish, vehicle='car'):
+    """(route, routing calls made). Cached on vehicle + resolved coords, so spelling and stop_penalty never re-route."""
     a, b = (f"{p['lat']:.4f},{p['lon']:.4f}" for p in (start, finish))
     if a == b:
         here = [round(start['lon'], 5), round(start['lat'], 5)]
-        return {'distance_miles': 0.0, 'duration_hours': 0.0, 'line': [here, here], 'corridor': []}, 0
-    key = f'leg:{a};{b}'
+        return {'distance_miles': 0.0, 'duration_hours': 0.0, 'line': [here, here], 'corridor': [],
+                'routing': None}, 0
+    key = f'leg:{vehicle}:{a};{b}'
     if (hit := cache.get(key)) is not None:
         return hit, 0
-    route = geo.get_route(start, finish)
+    route = geo.get_route(start, finish, vehicle)
     coords = route['coords']
     # ponytail: keep every Nth point for the response only; Douglas-Peucker if the line looks jagged when zoomed in
     step = math.ceil(len(coords) / MAX_ROUTE_POINTS)
@@ -33,18 +35,19 @@ def leg(start, finish):
     result = {
         'distance_miles': route['distance_miles'],
         'duration_hours': route['duration_hours'],
+        'routing': route['routing'],
         'line': [[round(x, 5), round(y, 5)] for x, y in line],
         'corridor': [(m, s.price, (s.name, s.address, s.city, s.state, s.lat, s.lon))
                      for m, s in geo.stations_along(coords)],
     }
-    cache.set(key, result)
-    return result, 1
+    cache.set(key, result, 600 if route['calls'] > 1 else DEFAULT_TIMEOUT)  # retry Valhalla soon after an outage
+    return result, route['calls']
 
 
-def plan(start_q, finish_q, stop_penalty=STOP_PENALTY):
+def plan(start_q, finish_q, stop_penalty=STOP_PENALTY, vehicle='car'):
     """(result, external calls made). Only the optimizer runs on a cached route."""
     start, finish = geo.resolve(start_q), geo.resolve(finish_q)
-    route, calls = leg(start, finish)
+    route, calls = leg(start, finish, vehicle)
     fuel = plan_fuel_stops(route['corridor'], route['distance_miles'], range_miles=RANGE_MILES,
                            stop_penalty=stop_penalty)
     return {
@@ -52,6 +55,7 @@ def plan(start_q, finish_q, stop_penalty=STOP_PENALTY):
         'finish': {'query': finish_q, 'lat': round(finish['lat'], 4), 'lon': round(finish['lon'], 4)},
         'distance_miles': round(route['distance_miles'], 1),
         'duration_hours': round(route['duration_hours'], 1),
+        'routing': route['routing'],
         'fuel_stops': [{
             'mile': st['mile'], 'name': name, 'address': address, 'city': city, 'state': state,
             'lat': round(lat, 4), 'lon': round(lon, 4),
@@ -82,8 +86,10 @@ def api_get(view):
 
 
 def plan_for(request):
-    """(result, None) or (None, JSON error response) for the request's start/finish/stop_penalty."""
-    start, finish, penalty = (request.GET.get(k, '').strip() for k in ('start', 'finish', 'stop_penalty'))
+    """(result, None) or (None, JSON error response) for the request's start/finish/stop_penalty/vehicle."""
+    start, finish, penalty, vehicle = (request.GET.get(k, '').strip()
+                                       for k in ('start', 'finish', 'stop_penalty', 'vehicle'))
+    vehicle = vehicle or 'car'
     if not start or not finish:
         return None, error(400, 'missing_parameter', 'Both "start" and "finish" are required.')
     try:
@@ -92,8 +98,10 @@ def plan_for(request):
             raise ValueError
     except ValueError:
         return None, error(400, 'invalid_parameter', '"stop_penalty" must be a number >= 0 (USD per stop).')
+    if vehicle not in ('car', 'truck'):
+        return None, error(400, 'invalid_parameter', '"vehicle" must be "car" or "truck".')
     try:
-        result, calls = plan(start, finish, penalty)
+        result, calls = plan(start, finish, penalty, vehicle)
     except ValueError as e:
         return None, error(400, 'unknown_location', f'Could not resolve to a US location: {e}')
     except Unreachable as e:
@@ -105,7 +113,7 @@ def plan_for(request):
                                             '(for example Hawaii to the mainland).')
     except geo.RoutingError as e:
         return None, error(502, 'routing_provider_error', str(e))
-    query = urlencode({'start': start, 'finish': finish, 'stop_penalty': penalty})
+    query = urlencode({'start': start, 'finish': finish, 'stop_penalty': penalty, 'vehicle': vehicle})
     result['map_url'] = request.build_absolute_uri(f"{reverse('route_map')}?{query}")
     result['external_api_calls'] = calls
     return result, None
