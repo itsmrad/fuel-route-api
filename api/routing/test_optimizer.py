@@ -5,8 +5,8 @@ from unittest import TestCase
 from routing.optimizer import Unreachable, plan_fuel_stops
 
 
-def brute_force(stations, total, rng):
-    """Min cost (mpg=1, start full) by DP over (station, fuel in whole miles)."""
+def brute_force(stations, total, rng, penalty=0):
+    """Min fuel cost + penalty per stop (mpg=1, start full), trying every purchase at every station."""
     pts = sorted(stations) + [(total, 0)]
     best = {rng - pts[0][0]: Decimal(0)} if pts[0][0] <= rng else {}
     for (mile, price), (nxt, _) in zip(pts, pts[1:]):
@@ -15,7 +15,7 @@ def brute_force(stations, total, rng):
             for buy in range(rng - fuel + 1):
                 left = fuel + buy - (nxt - mile)
                 if left >= 0:
-                    c = cost + buy * price
+                    c = cost + buy * price + (penalty if buy else 0)
                     new[left] = min(new.get(left, c), c)
         best = new
     return min(best.values()) if best else None
@@ -50,14 +50,22 @@ class PlanFuelStopsTests(TestCase):
         self.assertEqual((r['total_gallons'], r['total_cost'], r['gallons_consumed']), (70.0, 225.0, 120.0))
         self.assertEqual(r['cost_of_fuel_consumed'], 385.71)  # 120 * 225 / 70
 
-    def test_greedy_matches_brute_force(self):
+    def test_matches_brute_force(self):
         rnd = random.Random(7)
-        for _ in range(300):
+        for i in range(400):
+            penalty = 0 if i < 300 else rnd.randint(1, 30)  # stops priced in after the original 300 instances
             total, rng = rnd.randint(5, 60), rnd.randint(8, 20)
             stations = [(rnd.randint(0, total), Decimal(rnd.randint(100, 500)) / 100) for _ in range(rnd.randint(0, 10))]
-            optimal = brute_force(stations, total, rng)
+            optimal = brute_force(stations, total, rng, penalty)
             try:
-                got = plan_fuel_stops([(m, p, None) for m, p in stations], total, rng, mpg=1)['total_cost']
+                r = plan_fuel_stops([(m, p, None) for m, p in stations], total, rng, mpg=1, stop_penalty=penalty)
+                got = Decimal(str(r['total_cost'])) + penalty * len(r['stops'])
             except Unreachable:
                 got = None
-            self.assertEqual(got, None if optimal is None else float(optimal), (stations, total, rng))
+            self.assertEqual(got, optimal, (stations, total, rng, penalty))
+
+    def test_penalty_skips_small_top_ups(self):
+        stations = [(100 * i, Decimal(320 - i) / 100, i) for i in range(1, 15)]  # a cent cheaper every 100 mi
+        free, priced = (plan_fuel_stops(stations, 1500, stop_penalty=p) for p in (0, 15))
+        self.assertEqual((len(free['stops']), len(priced['stops'])), (10, 2))
+        self.assertLess(priced['total_cost'] - free['total_cost'], 15)

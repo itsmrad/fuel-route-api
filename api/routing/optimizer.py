@@ -1,4 +1,7 @@
+import math
 from decimal import ROUND_HALF_UP, Decimal
+
+STOP_PENALTY = 15.0  # USD per stop, roughly 30 min of driver time
 
 
 class Unreachable(Exception):
@@ -15,40 +18,48 @@ def _r(x, places):
     return float(x.quantize(Decimal(1).scaleb(-places), ROUND_HALF_UP))
 
 
-def plan_fuel_stops(stations, total_miles, range_miles=500, mpg=10, start_fuel_miles=None):
-    """Greedy "to fill or not to fill" over (mile, price, payload) stations; optimal on a line.
+def plan_fuel_stops(stations, total_miles, range_miles=500, mpg=10, start_fuel_miles=None, stop_penalty=STOP_PENALTY):
+    """Min fuel cost + stop_penalty per stop over (mile, price, payload) stations, by DP over (station, fuel).
 
+    dp[f] = cheapest way to arrive with f whole miles of fuel. At a station, either drive on or pay the penalty
+    and fill from some f0 <= f up to f; min over f0 of dp[f0] - price*f0 is a running minimum, so a station costs
+    O(range) and the trip O(stations x range). Positions round up to whole miles, so every plan is feasible.
     cost_of_fuel_consumed = trip gallons x average price paid, or the cheapest corridor price if nothing was bought.
     """
-    total, rng, mpg = _d(total_miles), _d(range_miles), _d(mpg)
-    fuel = rng if start_fuel_miles is None else _d(start_fuel_miles)
-    pts = sorted(((_d(m), _d(p), s) for m, p, s in stations if 0 <= _d(m) <= total), key=lambda t: t[0])
+    total, mpg, F, inf = _d(total_miles), _d(mpg), int(range_miles), math.inf
+    pts = sorted(((float(m), _d(p), s) for m, p, s in stations if 0 <= _d(m) <= total), key=lambda t: t[0])
     cheapest = min((p for _, p, _ in pts), default=None)
-    pts.append((total, Decimal(0), None))  # destination: free fuel, so never worth arriving with a surplus
-    if pts[0][0] > fuel:
-        raise Unreachable(0.0, float(pts[0][0]))
-    fuel -= pts[0][0]
-    stops, i = [], 0
-    while i < len(pts) - 1:
-        mile, price, payload = pts[i]
-        cheaper = best = None
-        j = i + 1
-        while j < len(pts) and pts[j][0] - mile <= rng:
-            if pts[j][1] < price:
-                cheaper = j
-                break
-            if best is None or pts[j][1] < pts[best][1]:
-                best = j
-            j += 1
-        if cheaper is None and best is None:
-            raise Unreachable(float(mile), float(pts[i + 1][0]))
-        nxt = best if cheaper is None else cheaper
-        buy = max((rng if cheaper is None else pts[nxt][0] - mile) - fuel, Decimal(0))
-        if buy:
-            gallons = buy / mpg
-            stops.append({'mile': mile, 'price': price, 'gallons': gallons, 'cost': gallons * price, 'payload': payload})
-        fuel += buy - (pts[nxt][0] - mile)
-        i = nxt
+    dp = [inf] * (F + 1)
+    dp[min(F, int(F if start_fuel_miles is None else start_fuel_miles))] = 0.0
+    pos, prev, back = 0, 0.0, []
+    for m, p, s in pts + [(float(total), None, None)]:
+        here = math.ceil(m)
+        d, pos = here - pos, here
+        dp = dp[d:] + [inf] * min(d, F + 1)  # drive d miles: f -> f - d
+        if min(dp) == inf:
+            raise Unreachable(prev, m)
+        if p is None:
+            break
+        new, came_from = dp[:], list(range(F + 1))
+        price, best, arg = float(p), inf, 0
+        for f in range(math.floor(m + F) - here + 1):  # tank cap, measured from the rounded-up position
+            v = dp[f] - price * f
+            if v < best:
+                best, arg = v, f
+            v = best + price * f + stop_penalty
+            if v < new[f]:
+                new[f], came_from[f] = v, arg
+        dp, prev = new, m
+        back.append((m, p, s, here, came_from))
+
+    f, stops = min(range(F + 1), key=dp.__getitem__), []
+    for m, p, s, here, came_from in reversed(back):
+        f += pos - here  # fuel when leaving this station
+        bought, f, pos = f - came_from[f], came_from[f], here
+        if bought:
+            gallons = Decimal(bought) / mpg
+            stops.append({'mile': _d(m), 'price': p, 'gallons': gallons, 'cost': gallons * p, 'payload': s})
+    stops.reverse()
 
     total_gallons = sum((s['gallons'] for s in stops), Decimal(0))
     total_cost = sum((s['cost'] for s in stops), Decimal(0))
