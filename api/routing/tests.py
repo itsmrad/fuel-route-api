@@ -1,6 +1,6 @@
 from django.test import SimpleTestCase
 
-from routing.management.commands.load_stations import aliases, normalize
+from routing.geo import aliases, normalize
 
 
 class NormalizeTests(SimpleTestCase):
