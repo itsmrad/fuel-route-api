@@ -80,7 +80,8 @@ class RouteApiTests(TestCase):
         self.assertTrue(body['map_url'].endswith('&vehicle=truck'))
 
     def test_truck_falls_back_to_osrm(self, *_):
-        for valhalla in (requests.ConnectionError('boom'), {'error_code': 154, 'error': 'too far'}):
+        for valhalla in (requests.ConnectionError('boom'), {'error_code': 154, 'error': 'too far'},
+                        {'trip': {'legs': [{'shape': '?'}], 'summary': {'length': 1, 'time': 1}}}):
             cache.clear()
             r, calls = self.truck(valhalla)
             self.assertEqual((r.status_code, calls, r.json()['external_api_calls']), (200, 2, 2))

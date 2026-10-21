@@ -207,11 +207,7 @@ def osrm(host, start, finish):
     if data.get('code') != 'Ok' or not data.get('routes'):
         raise RoutingError(data.get('message') or f"no route ({data.get('code')})")
     route = data['routes'][0]
-    try:
-        coords = polyline6(route['geometry'])
-    except IndexError as e:
-        raise RoutingError('invalid route geometry') from e
-    return {'coords': coords, 'distance_miles': route['distance'] / 1609.344,
+    return {'coords': polyline6(route['geometry']), 'distance_miles': route['distance'] / 1609.344,
             'duration_hours': route['duration'] / 3600}
 
 
@@ -238,6 +234,8 @@ def polyline6(s):
         for k in (0, 1):
             shift = n = 0
             while True:
+                if i == len(s):
+                    raise RoutingError('invalid route geometry')  # truncated: fail over like any bad reply
                 b = ord(s[i]) - 63
                 i += 1
                 n |= (b & 31) << shift
