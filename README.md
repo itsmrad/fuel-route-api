@@ -22,7 +22,9 @@ Live docs and demo: (deployment URL — added in deploy step)
 
 ## Quickstart
 
-Needs [uv](https://docs.astral.sh/uv/) (installs Python 3.14 itself) and Node 20+ for the docs.
+With Docker: `docker compose up` → docs and route planner on http://localhost:3000, API on http://localhost:8000 (first build ~5 min; the image ships with the station data loaded).
+
+Without Docker: needs [uv](https://docs.astral.sh/uv/) (installs Python 3.14 itself) and Node 20+ for the docs.
 
 ```bash
 # API on http://127.0.0.1:8000

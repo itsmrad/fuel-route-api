@@ -4,6 +4,16 @@ description: Run the API and these docs locally, then make the first request.
 icon: Rocket
 ---
 
+## With Docker
+
+```bash
+docker compose up    # from the repo root
+```
+
+Docs and route planner on http://localhost:3000, API on http://localhost:8000. The API image is built with the stations already loaded. Ports taken? `API_PORT=18000 DOCS_PORT=13000 docker compose up`.
+
+## Without Docker
+
 You need [uv](https://docs.astral.sh/uv/) and Node 20 or newer. uv installs the pinned Python (3.14, from `.python-version`) on first run.
 
 <Steps>
