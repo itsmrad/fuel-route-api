@@ -7,7 +7,7 @@ Django API that takes a start and finish location in the USA and returns the rou
 Monorepo:
 
 - `api/`: Django project (`manage.py`, `config/`, `routing/`, `data/`, `pyproject.toml` + `uv.lock`)
-- `docs/`: Fumadocs (Next.js) docs site with an interactive route planner and API reference (coming)
+- `docs/`: Fumadocs (Next.js) docs site with an interactive route planner and API reference (see `docs/README.md`)
 - `deploy/`: Caddyfile, systemd units, `deploy.sh` (coming)
 
 ## Setup
