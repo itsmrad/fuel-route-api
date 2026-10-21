@@ -4,7 +4,7 @@ description: From a price CSV with no coordinates to 6,443 placed stations, offl
 icon: Database
 ---
 
-The provided `fuel-prices.csv` has a station ID, name, address, city, state and retail price. No coordinates. Addresses look like `I-44, EXIT 283 & US-69`, which no free geocoder resolves reliably. So stations are placed at the centroid of their city, using the US Census Gazetteer, once, in `manage.py load_stations`.
+The provided `fuel-prices.csv` has a station ID, name, address, city, state and retail price. No coordinates. Addresses look like `I-44, EXIT 283 & US-69`, which no free geocoder resolves reliably. So stations are placed at the centroid of their city, using the US Census Gazetteer, once, in `manage.py load_stations`, and moved to a geocoded address where a one-time Geoapify pass found a trustworthy one (`data/station_coords.csv`, committed, so no key is needed).
 
 ## Pipeline
 
@@ -14,6 +14,7 @@ The provided `fuel-prices.csv` has a station ID, name, address, city, state and 
 | Dedupe by `OPIS Truckstop ID` | 6,738 | Duplicate IDs collapse; the cheapest price wins. |
 | Keep US states | 6,626 | Canadian rows (BC, ON, AB, SK…) are out of scope. |
 | Match city to Gazetteer | **6,443** | **97.2%** placed. The rest are logged and dropped. |
+| Override from `station_coords.csv` | 741 | **11.5%** moved from the city centroid to a geocoded address. |
 
 ## Matching
 
@@ -27,10 +28,26 @@ The provided `fuel-prices.csv` has a station ID, name, address, city, state and 
 
 The CSV city is matched unstripped, so `Junction City` never falls through to a place called `Junction`.
 
+## Address geocoding (one-time, offline)
+
+`manage.py geocode_stations` ran once with a Geoapify key and wrote `api/data/station_coords.csv` (`opis_id, lat, lon, source, confidence`). `load_stations` reads it when present; nobody else needs a key.
+
+- **Budget.** 6,443 stations share 6,075 unique address strings. The free tier is 3,000 credits/day and batch geocoding costs 0.5 credit/address plus 1 per job call and poll, so the run sent the 5,000 highest-priority addresses (interstate addresses first, then states with the most stations) for ~2,600 credits. The other 1,075 keep their centroid; re-running the command sends only those.
+- **Filter.** A hit is kept only if it is a building, street or amenity with confidence ≥ 0.5, shares a number with the address (`US-259` → `US Highway 259`, `I-35, EXIT 140` → `Interchange 140`; not `Trail Exit`), and lies within 25 mi of the city centroid (guards against a same-named place elsewhere). Everything else keeps the centroid.
+- **Yield.** 741 stations (11.5%) moved; median shift 1.7 mi, p90 5.0 mi. Most addresses look like `I-55, EXIT 180`, which the geocoder only resolves to the city, so they keep the centroid.
+
+| Route | Corridor stations (before → after) | Total fuel cost | Stops |
+| --- | --- | --- | --- |
+| Dallas, TX → Chicago, IL | 189 → 187 | $133.52 → $133.52 | 2 → 2 |
+| New York, NY → Los Angeles, CA | 447 → 448 | $702.79 → $702.79 | 7 → 7 |
+| Miami, FL → Seattle, WA | 382 → 382 | $853.01 → $853.01 | 8 → 8 |
+
+The centroid was already close enough: the 10-mile corridor absorbed the error, and no plan changed.
+
 ## Limitations
 
 <Callout title="City centroid, not the station" type="warn">
-A station's position is its city's centroid, a few miles from the actual exit. The 10-mile corridor absorbs most of that error, and mile markers can be off by a few miles. The fix is to geocode station addresses once, offline, and store real coordinates.
+Except for the 741 address-geocoded stations, a station's position is its city's centroid, a few miles from the actual exit. The 10-mile corridor absorbs most of that error, and mile markers can be off by a few miles. The fix for `I-xx, EXIT nn` addresses is an exit-number lookup (OSM `motorway_junction` nodes).
 </Callout>
 
 - **Sparse regions.** The dataset has only 8 California stations, all near the Mexican border. NYC → LA runs its last ~273 miles with no station in reach, which is fine inside the 500-mile range, but it means a plan in the far West has fewer choices than the map suggests.

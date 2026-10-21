@@ -109,7 +109,8 @@ Nine fewer stops for +$3.87. The penalty only steers the choice; it is never add
 
 The CSV has no coordinates and addresses like `I-44, EXIT 283 & US-69`. `load_stations` dedupes 8,151 rows to 6,738 stations, keeps **6,626 US** ones, and places **97.2%** (6,443) at their city centroid via the US Census 2024 Gazetteer (places + county subdivisions, name normalization, consolidated-city aliases). Unmatched rows are logged and dropped.
 
-- **City centroid, not the exit**: mile markers can be off by a few miles; the 10-mile corridor absorbs most of it.
+- **Address geocoding (one-time)**: `manage.py geocode_stations` sent the 5,000 highest-priority of 6,075 unique addresses to the Geoapify batch API (~2,600 of the 3,000 free daily credits) and kept a hit only if it was street-level or better, shared a number with the address and sat within 25 mi of the city centroid. Result, committed as `api/data/station_coords.csv` (no key needed): **741 stations (11.5%)** moved off the centroid, median 1.7 mi, p90 5.0 mi. Most addresses (`I-55, EXIT 180`) only resolve to the city.
+- **Impact is nil on plans**: corridor stations Dallas → Chicago 189 → 187, NYC → LA 447 → 448, Miami → Seattle 382 → 382; total cost and stops unchanged ($133.52/2, $702.79/7, $853.01/8). The 10-mile corridor already absorbs the centroid error.
 - **California gap**: only 8 CA stations, all near the Mexican border, so NYC → LA has no station for its last ~273 mi (fine within range, fewer choices out West).
 
 ## Tests
@@ -129,10 +130,10 @@ api/                     Django project (uv)
     geo.py               resolve location, OSRM client, stations along route
     optimizer.py         plan_fuel_stops() DP
     views.py             /api/route/, /api/route/map/, /api/openapi.yaml
-    management/commands/load_stations.py
+    management/commands/load_stations.py, geocode_stations.py
     templates/routing/map.html
     test_*.py
-  data/fuel-prices.csv
+  data/fuel-prices.csv, station_coords.csv
   openapi.yaml           OpenAPI 3.1 spec (served at /api/openapi.yaml)
 docs/                    Fumadocs (Next.js): guides, route planner, API reference
 postman_collection.json
@@ -143,7 +144,7 @@ plan.md                  design notes
 
 | Limit | Upgrade |
 | --- | --- |
-| Stations at city centroid | Geocode station addresses once, offline |
+| Most stations at city centroid (11.5% address-geocoded) | Exit-number lookup for `I-xx, EXIT nn` addresses (OSM `motorway_junction`) |
 | Public OSRM servers (best-effort, ~1 req/s; FOSSGIS is the fallback) | Self-hosted OSRM or OpenRouteService; one-function swap in `get_route` |
 | Truck routing opt-in: public Valhalla caps trips at 1,500 km, so coast-to-coast falls back to OSRM car | Self-hosted Valhalla, then default `vehicle=truck` |
 | Sparse West Coast data | Fuller price feed; optimizer unchanged |
