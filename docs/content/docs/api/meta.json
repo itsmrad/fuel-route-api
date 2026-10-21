@@ -1,0 +1,6 @@
+{
+  "title": "API Reference",
+  "icon": "Braces",
+  "defaultOpen": true,
+  "pages": ["plan-route", "route-map"]
+}
