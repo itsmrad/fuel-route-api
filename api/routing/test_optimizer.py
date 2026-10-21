@@ -2,6 +2,7 @@ import random
 from decimal import Decimal
 from unittest import TestCase
 
+from routing.management.commands.benchmark import naive
 from routing.optimizer import Unreachable, plan_fuel_stops
 
 
@@ -69,3 +70,9 @@ class PlanFuelStopsTests(TestCase):
         free, priced = (plan_fuel_stops(stations, 1500, stop_penalty=p) for p in (0, 15))
         self.assertEqual((len(free['stops']), len(priced['stops'])), (10, 2))
         self.assertLess(priced['total_cost'] - free['total_cost'], 15)
+
+    def test_naive_baseline_fills_when_low(self):
+        stations = [(100, Decimal(3), 'a'), (450, Decimal(4), 'b'), (700, Decimal(3), 'c')]
+        self.assertEqual(naive(stations, 1000), (30 + 140 + 75 - 60, 3))  # 200 mi left at the end, credited at $3
+        with self.assertRaises(Unreachable):
+            naive([(600, 3, None)], 1000)
