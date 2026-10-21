@@ -17,7 +17,7 @@ Live docs and demo: (deployment URL — added in deploy step)
 | Total money spent at 10 MPG | `total_fuel_cost` (fuel bought on the way) and `cost_of_fuel_consumed` (all fuel used). Money math in `Decimal`. | `optimizer.py` |
 | Use the provided price file | Deduplicated and geocoded once by `manage.py load_stations`. | `api/data/fuel-prices.csv` |
 | Free routing API, few calls | OSRM public server, one call returns geometry, distance and duration. | `geo.get_route` |
-| Fast | Cold ~1.5 s (almost all OSRM), cached 7–30 ms. | see Performance |
+| Fast | Cold ~1.5 s (almost all OSRM), cached 15–40 ms. | see Performance |
 | Latest Django | Django 6.1, plain `JsonResponse`, no DRF. | `api/pyproject.toml` |
 
 ## Quickstart
@@ -78,7 +78,7 @@ Assumption: the truck starts with a full tank, so `total_fuel_cost` is fuel boug
 2. **Route** with OSRM `/route/v1/driving`: 1 call, full geometry.
 3. **Corridor match**: in-memory 0.5° grid index keeps stations within 10 mi of the polyline, each with a mile marker.
 4. **Optimize** stops (below).
-5. **Respond** and cache under normalized `start|finish|stop_penalty`; the map page reads the same entry.
+5. **Respond**. The route (distance, line, corridor) is cached on the resolved coordinates, so another spelling or `stop_penalty` re-runs only the optimizer; the map page reads the same entry.
 
 External call budget: **1** typical, **≤ 3** worst case (2 Nominatim + OSRM), **0** cached. Reported per response as `external_api_calls`.
 
@@ -98,7 +98,7 @@ Nine fewer stops for +$3.87. The penalty only steers the choice; it is never add
 | Stage | Time |
 | --- | --- |
 | Cold request | ~1.4–1.7 s, dominated by the OSRM call |
-| Cached request | 7–30 ms |
+| Cached route (optimizer re-runs) | 15–40 ms |
 | Corridor match | 18–30 ms |
 | DP (NYC → LA, 447 stations) | ~22 ms |
 
@@ -144,6 +144,6 @@ plan.md                  design notes
 | OSRM public demo server (best-effort, ~1 req/s) | Self-hosted OSRM or OpenRouteService; one-function swap in `get_route` |
 | Sparse West Coast data | Fuller price feed; optimizer unchanged |
 | Price snapshot | Scheduled `load_stations` from a live feed |
-| locmem cache, per process | Redis when there is more than one box |
+| File cache, one box | Redis when there is more than one box |
 | In-memory grid index | PostGIS + GiST past a few hundred thousand stations |
 | Fixed 500 mi / 10 MPG, full tank at start | `range`, `mpg`, `start_fuel` query parameters |

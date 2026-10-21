@@ -71,5 +71,5 @@ def plan_fuel_stops(stations, total_miles, range_miles=500, mpg=10, start_fuel_m
         'total_gallons': _r(total_gallons, 3),
         'total_cost': _r(total_cost, 2),
         'gallons_consumed': _r(consumed, 3),
-        'cost_of_fuel_consumed': None if avg is None else _r(consumed * avg, 2),
+        'cost_of_fuel_consumed': None if avg is None and consumed else _r(consumed * (avg or 0), 2),
     }

@@ -1,15 +1,22 @@
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, TestCase
+from django.core.cache import cache
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from routing import geo
 from routing.models import Station
+from routing.test_views import LOCMEM
 
 
-@patch('routing.geo.requests.get', side_effect=AssertionError('no network in tests'))
+@override_settings(CACHES=LOCMEM)
+@patch('routing.geo.time.sleep')
+@patch('routing.geo.http.get', side_effect=AssertionError('no network in tests'))
 @patch('routing.geo.places', return_value={('TX', 'dallas'): (32.79, -96.77), ('MO', 'stlouis'): (38.64, -90.24)})
 class ResolveTests(SimpleTestCase):
+    def setUp(self):
+        cache.clear()
+
     def test_city_state_is_local(self, *_):
         self.assertEqual(geo.resolve(' dallas , tx '), {
             'query': ' dallas , tx ', 'lat': 32.79, 'lon': -96.77, 'label': 'dallas, TX', 'external': False})
@@ -25,7 +32,16 @@ class ResolveTests(SimpleTestCase):
             with self.assertRaises(ValueError, msg=q):
                 geo.resolve(q)
 
-    def test_nominatim_fallback_rejects_non_us_hit(self, _, get):
+    def test_nominatim_cached_and_throttled(self, _, get, sleep):
+        get.side_effect = None
+        get.return_value.json.return_value = [{'lat': '35.0', 'lon': '-90.0', 'display_name': 'Somewhere, TN'}]
+        self.assertTrue(geo.resolve('Somewhere TN')['external'])
+        r = geo.resolve('  somewhere   tn ')
+        self.assertEqual((r['lat'], r['external'], get.call_count), (35.0, False, 1))
+        geo.resolve('Elsewhere TN')
+        self.assertGreater(sleep.call_args[0][0], 0.9)  # second live call waits out the 1 s gap
+
+    def test_nominatim_fallback_rejects_non_us_hit(self, _, get, _sleep):
         get.side_effect = None
         get.return_value.json.return_value = [{'lat': '51.5', 'lon': '-0.12', 'display_name': 'London'}]
         with self.assertRaises(ValueError):

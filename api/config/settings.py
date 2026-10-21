@@ -84,10 +84,15 @@ DATABASES = {
 
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',  # ponytail: per-process; Redis if >1 box
+        'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',  # ponytail: one box; Redis if >1
+        'LOCATION': os.environ.get('CACHE_DIR', BASE_DIR / '.cache'),
         'TIMEOUT': 24 * 3600,
     }
 }
+
+# Behind Caddy / the Next.js proxy: build map_url from the client-facing scheme and host.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
 
 
 # Password validation

@@ -1,5 +1,4 @@
 import functools
-import hashlib
 import math
 from urllib.parse import urlencode
 
@@ -18,38 +17,53 @@ RANGE_MILES = 500
 MAX_ROUTE_POINTS = 5000  # ~150 KB of coordinates for NYC->LA
 
 
-def plan(start_q, finish_q, stop_penalty=STOP_PENALTY):
-    """(result, external calls made). Cached on normalized input, so a repeat costs 0 calls."""
-    norm = ' '.join(start_q.lower().split()) + '|' + ' '.join(finish_q.lower().split()) + f'|{stop_penalty!r}'
-    key = 'route:' + hashlib.sha1(norm.encode()).hexdigest()
+def leg(start, finish):
+    """(route, OSRM calls made). Cached on resolved coords, so spelling and stop_penalty never re-call OSRM."""
+    a, b = (f"{p['lat']:.4f},{p['lon']:.4f}" for p in (start, finish))
+    if a == b:
+        here = [round(start['lon'], 5), round(start['lat'], 5)]
+        return {'distance_miles': 0.0, 'duration_hours': 0.0, 'line': [here, here], 'corridor': []}, 0
+    key = f'leg:{a};{b}'
     if (hit := cache.get(key)) is not None:
         return hit, 0
-    start, finish = geo.resolve(start_q), geo.resolve(finish_q)
     route = geo.get_route(start, finish)
-    fuel = plan_fuel_stops([(m, s.price, s) for m, s in geo.stations_along(route['coords'])],
-                           route['distance_miles'], range_miles=RANGE_MILES, stop_penalty=stop_penalty)
     coords = route['coords']
     # ponytail: keep every Nth point for the response only; Douglas-Peucker if the line looks jagged when zoomed in
     step = math.ceil(len(coords) / MAX_ROUTE_POINTS)
     line = coords[::step] + ([coords[-1]] if (len(coords) - 1) % step else [])
     result = {
+        'distance_miles': route['distance_miles'],
+        'duration_hours': route['duration_hours'],
+        'line': [[round(x, 5), round(y, 5)] for x, y in line],
+        'corridor': [(m, s.price, (s.name, s.address, s.city, s.state, s.lat, s.lon))
+                     for m, s in geo.stations_along(coords)],
+    }
+    cache.set(key, result)
+    return result, 1
+
+
+def plan(start_q, finish_q, stop_penalty=STOP_PENALTY):
+    """(result, external calls made). Only the optimizer runs on a cached route."""
+    start, finish = geo.resolve(start_q), geo.resolve(finish_q)
+    route, calls = leg(start, finish)
+    fuel = plan_fuel_stops(route['corridor'], route['distance_miles'], range_miles=RANGE_MILES,
+                           stop_penalty=stop_penalty)
+    return {
         'start': {'query': start_q, 'lat': round(start['lat'], 4), 'lon': round(start['lon'], 4)},
         'finish': {'query': finish_q, 'lat': round(finish['lat'], 4), 'lon': round(finish['lon'], 4)},
         'distance_miles': round(route['distance_miles'], 1),
         'duration_hours': round(route['duration_hours'], 1),
         'fuel_stops': [{
-            'mile': st['mile'], 'name': s.name, 'address': s.address, 'city': s.city, 'state': s.state,
-            'lat': round(s.lat, 4), 'lon': round(s.lon, 4),
+            'mile': st['mile'], 'name': name, 'address': address, 'city': city, 'state': state,
+            'lat': round(lat, 4), 'lon': round(lon, 4),
             'price': st['price'], 'gallons': st['gallons'], 'cost': st['cost'],
-        } for st in fuel['stops'] for s in [st['payload']]],
+        } for st in fuel['stops'] for name, address, city, state, lat, lon in [st['payload']]],
         'total_gallons_purchased': fuel['total_gallons'],
         'total_fuel_cost': fuel['total_cost'],
         'cost_of_fuel_consumed': fuel['cost_of_fuel_consumed'],
         'stop_penalty': stop_penalty,
-        'route': {'type': 'LineString', 'coordinates': [[round(x, 5), round(y, 5)] for x, y in line]},
-    }
-    cache.set(key, result)
-    return result, 1 + start['external'] + finish['external']
+        'route': {'type': 'LineString', 'coordinates': route['line']},
+    }, calls + start['external'] + finish['external']
 
 
 def error(status, code, detail):
@@ -88,10 +102,12 @@ def plan_for(request):
         a, b = e.gap_start_mile, e.gap_end_mile
         return None, error(422, 'unreachable', f'No fuel station between mile {a:.1f} and mile {b:.1f} '
                                                f'({b - a:.1f} mi gap, range is {RANGE_MILES} mi).')
+    except geo.NoRoute:
+        return None, error(422, 'no_route', 'No driving route between start and finish '
+                                            '(for example Hawaii to the mainland).')
     except geo.RoutingError as e:
         return None, error(502, 'routing_provider_error', str(e))
     query = urlencode({'start': start, 'finish': finish, 'stop_penalty': penalty})
-    result['start']['query'], result['finish']['query'] = start, finish  # cache hit may have other spelling
     result['map_url'] = request.build_absolute_uri(f"{reverse('route_map')}?{query}")
     result['external_api_calls'] = calls
     return result, None
