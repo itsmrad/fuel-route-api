@@ -108,7 +108,7 @@ Twenty decisions across 19 merged pull requests, in the order they were made. Ea
 
 **Decision.** Bucket stations by cell, sample the route about once per mile, check only the cells the route crosses, and keep the cumulative mile of the nearest route point.
 
-**Result.** **Corridor search in 18 ms for Dallas → Chicago (189 stations) and 30 ms for NYC → LA (447)**, measured live on full route geometry, by indexing stations in a 0.5° grid. The largest gap between sampled route points is 3.9 mi, so no station within the corridor is skipped.
+**Result.** **Corridor search in 18 ms for Dallas → Chicago (189 stations) and 30 ms for NYC → LA (447)**, measured live on full route geometry at the time (187 and 448 stations after [decision 18](#18-geocode-addresses-once-with-geoapify-and-keep-the-centroid)), by indexing stations in a 0.5° grid. The largest gap between sampled route points is 3.9 mi, so no station within the corridor is skipped.
 
 **Trade-off.** In memory and rebuilt per worker (41 ms at startup). PostGIS with a GiST index is the move past a few hundred thousand stations. [PR #4](https://github.com/itsmrad/fuel-route-api/pull/4)
 
