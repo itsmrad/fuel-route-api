@@ -163,11 +163,16 @@ paths:
                 type: string
               example: '<!doctype html><html><head><title>Dallas, TX to Chicago, IL</title>...'
         '400':
-          description: Missing or invalid input, or a location that is unknown or outside the USA.
+          description: |
+            Missing or invalid input, or a location that is unknown or outside the USA.
+            Only one of start/finish given: the form again (HTML) with the message.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+            text/html:
+              schema:
+                type: string
         '422':
           description: Route has a gap longer than the 500-mile range, or no road connects start and finish.
           content:

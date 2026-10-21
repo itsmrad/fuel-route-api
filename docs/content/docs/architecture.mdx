@@ -14,7 +14,7 @@ icon: Workflow
 4. **Optimize** the stops with the dynamic program described in [How the optimizer works](/docs/optimizer).
 5. **Respond** with JSON. The route (distance, line, corridor stations) is cached on the resolved coordinates, so another spelling or `stop_penalty` re-runs only the optimizer. `/api/route/map/` reads the same entry.
 
-Internally the steps are three plain functions: `resolve(query) → {query, lat, lon, label, external}`, `get_route(a, b) → {coords, distance_miles, duration_hours}`, and `plan_fuel_stops(...)`. `external_api_calls` is `1` for OSRM plus `1` for each location that needed Nominatim.
+Internally the steps are three plain functions: `resolve(query) → {lat, lon, external}`, `get_route(a, b) → {coords, distance_miles, duration_hours}`, and `plan_fuel_stops(...)`. `external_api_calls` is `1` for OSRM plus `1` for each location that needed Nominatim.
 
 ## Where the time goes
 

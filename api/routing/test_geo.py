@@ -18,8 +18,7 @@ class ResolveTests(SimpleTestCase):
         cache.clear()
 
     def test_city_state_is_local(self, *_):
-        self.assertEqual(geo.resolve(' dallas , tx '), {
-            'query': ' dallas , tx ', 'lat': 32.79, 'lon': -96.77, 'label': 'dallas, TX', 'external': False})
+        self.assertEqual(geo.resolve(' dallas , tx '), {'lat': 32.79, 'lon': -96.77, 'external': False})
         self.assertEqual(geo.resolve('Saint Louis, MO')['lat'], 38.64)
 
     def test_lat_lon(self, *_):
@@ -28,13 +27,13 @@ class ResolveTests(SimpleTestCase):
         self.assertEqual(geo.resolve('21.3,-157.85')['lat'], 21.3)  # Honolulu
 
     def test_rejects_outside_usa(self, *_):
-        for q in ['51.5,-0.12', '91,0', '']:
+        for q in ['51.5,-0.12', '49.28,-123.12', '91,0', '']:  # London, Vancouver
             with self.assertRaises(ValueError, msg=q):
                 geo.resolve(q)
 
     def test_nominatim_cached_and_throttled(self, _, get, sleep):
         get.side_effect = None
-        get.return_value.json.return_value = [{'lat': '35.0', 'lon': '-90.0', 'display_name': 'Somewhere, TN'}]
+        get.return_value.json.return_value = [{'lat': '35.0', 'lon': '-90.0'}]
         self.assertTrue(geo.resolve('Somewhere TN')['external'])
         r = geo.resolve('  somewhere   tn ')
         self.assertEqual((r['lat'], r['external'], get.call_count), (35.0, False, 1))
@@ -43,7 +42,7 @@ class ResolveTests(SimpleTestCase):
 
     def test_nominatim_fallback_rejects_non_us_hit(self, _, get, _sleep):
         get.side_effect = None
-        get.return_value.json.return_value = [{'lat': '51.5', 'lon': '-0.12', 'display_name': 'London'}]
+        get.return_value.json.return_value = [{'lat': '51.5', 'lon': '-0.12'}]
         with self.assertRaises(ValueError):
             geo.resolve('London')
         get.return_value.json.return_value = []

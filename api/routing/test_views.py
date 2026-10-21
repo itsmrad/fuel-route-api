@@ -127,5 +127,7 @@ class RouteApiTests(TestCase):
         self.assertContains(r, 'leaflet')
         self.assertContains(r, '"S1"')
         self.assertEqual(self.client.get('/api/route/map/').status_code, 200)  # empty demo form
+        r = self.client.get('/api/route/map/?start=Dallas, TX')
+        self.assertContains(r, 'Both start and finish are required.', status_code=400)
         r, _ = self.get('/api/route/map/?start=Dallas, TX&finish=Nowhere, ZZ')
         self.assertEqual((r.status_code, r.json()['error']), (400, 'unknown_location'))

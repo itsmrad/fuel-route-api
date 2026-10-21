@@ -31,7 +31,9 @@ LSAD = re.compile(
 UA = {'User-Agent': 'fuel-route-api/1.0 (github.com/itsmrad/fuel-route-api)'}
 NOMINATIM = 'https://nominatim.openstreetmap.org/search'
 OSRM = 'https://router.project-osrm.org/route/v1/driving/'
-USA = [(24, 50, -125, -66), (51, 72, -180, -129), (51, 53, 172, 180), (18.5, 22.5, -161, -154)]  # CONUS, AK, Aleutians, HI
+# CONUS west (49th parallel, keeps Vancouver out), CONUS east (Northwest Angle), AK, Aleutians, HI.
+# ponytail: boxes still admit southern Ontario and northern Mexico; a border polygon if that matters
+USA = [(24, 49.01, -125, -95.2), (24, 49.4, -95.2, -66), (51, 72, -180, -129), (51, 53, 172, 180), (18.5, 22.5, -161, -154)]
 LATLON = re.compile(r'(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)')
 CITY_ST = re.compile(r'([^,]+?)\s*,\s*([A-Za-z]{2})')
 CELL = 0.5  # grid cell size, degrees
@@ -75,7 +77,8 @@ def gazetteer(kind):
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         part = path.with_suffix('.part')  # never cache a half-downloaded zip
-        urllib.request.urlretrieve(GAZETTEER.format(kind), part)
+        with urllib.request.urlopen(GAZETTEER.format(kind), timeout=60) as r:
+            part.write_bytes(r.read())
         part.rename(path)
     with zipfile.ZipFile(path) as z, z.open(z.namelist()[0]) as f:
         rows = csv.reader(io.TextIOWrapper(f, encoding='utf-8'), delimiter='\t')
@@ -121,16 +124,16 @@ def resolve(query):
             raise ValueError(f'{query!r}: expected "lat,lon" with lat in [-90, 90] and lon in [-180, 180]')
         if not in_usa(lat, lon):
             raise ValueError(f'{query!r} is outside the USA')
-        return {'query': query, 'lat': lat, 'lon': lon, 'label': q, 'external': False}
+        return {'lat': lat, 'lon': lon, 'external': False}
     if (m := CITY_ST.fullmatch(q)) and (ll := places().get((m[2].upper(), normalize(m[1], False)))):
-        return {'query': query, 'lat': ll[0], 'lon': ll[1], 'label': f'{m[1]}, {m[2].upper()}', 'external': False}
+        return {'lat': ll[0], 'lon': ll[1], 'external': False}
     hits, external = nominatim(q)
     if not hits:
         raise ValueError(f'location not found in the USA: {query!r}')
     lat, lon = float(hits[0]['lat']), float(hits[0]['lon'])
     if not in_usa(lat, lon):
         raise ValueError(f'{query!r} is outside the USA')
-    return {'query': query, 'lat': lat, 'lon': lon, 'label': hits[0]['display_name'], 'external': external}
+    return {'lat': lat, 'lon': lon, 'external': external}
 
 
 def nominatim(q):
@@ -144,7 +147,7 @@ def nominatim(q):
         try:
             r = http.get(NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'}, timeout=5)
             r.raise_for_status()
-            hits = [{k: h[k] for k in ('lat', 'lon', 'display_name')} for h in r.json()[:1]]
+            hits = [{k: h[k] for k in ('lat', 'lon')} for h in r.json()[:1]]
         except requests.RequestException as e:
             raise RoutingError(f'geocoder unavailable: {e}') from e
         finally:

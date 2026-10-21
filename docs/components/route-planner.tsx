@@ -230,8 +230,8 @@ function RequestLine({ state }: { state: Exclude<State, { phase: 'idle' }> }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border bg-fd-muted/60 px-3 py-2 font-mono text-xs">
       <span className="font-semibold text-ok">GET</span>
-      <span className="min-w-0 flex-1 truncate text-fd-muted-foreground" title={decodeURIComponent(state.url)}>
-        {decodeURIComponent(state.url).replaceAll('+', ' ')}
+      <span className="min-w-0 flex-1 truncate text-fd-muted-foreground" title={decodeURIComponent(state.url.replaceAll('+', ' '))}>
+        {decodeURIComponent(state.url.replaceAll('+', ' '))}
       </span>
       {state.phase === 'loading' ? (
         <span className="text-fd-muted-foreground">pending…</span>

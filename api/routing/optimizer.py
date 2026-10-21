@@ -18,7 +18,7 @@ def _r(x, places):
     return float(x.quantize(Decimal(1).scaleb(-places), ROUND_HALF_UP))
 
 
-def plan_fuel_stops(stations, total_miles, range_miles=500, mpg=10, start_fuel_miles=None, stop_penalty=STOP_PENALTY):
+def plan_fuel_stops(stations, total_miles, range_miles=500, mpg=10, stop_penalty=STOP_PENALTY):
     """Min fuel cost + stop_penalty per stop over (mile, price, payload) stations, by DP over (station, fuel).
 
     dp[f] = cheapest way to arrive with f whole miles of fuel. At a station, either drive on or pay the penalty
@@ -30,7 +30,7 @@ def plan_fuel_stops(stations, total_miles, range_miles=500, mpg=10, start_fuel_m
     pts = sorted(((float(m), _d(p), s) for m, p, s in stations if 0 <= _d(m) <= total), key=lambda t: t[0])
     cheapest = min((p for _, p, _ in pts), default=None)
     dp = [inf] * (F + 1)
-    dp[min(F, int(F if start_fuel_miles is None else start_fuel_miles))] = 0.0
+    dp[F] = 0.0  # full tank at the start
     pos, prev, back = 0, 0.0, []
     for m, p, s in pts + [(float(total), None, None)]:
         here = math.ceil(m)
