@@ -24,6 +24,7 @@
 <form method="get">
   <input name="start" placeholder="Start, e.g. Dallas, TX" value="{{ request.GET.start }}" required aria-label="Start">
   <input name="finish" placeholder="Finish, e.g. Chicago, IL" value="{{ request.GET.finish }}" required aria-label="Finish">
+  <input name="stop_penalty" type="number" min="0" step="any" placeholder="$/stop ({{ default_penalty }})" value="{{ request.GET.stop_penalty }}" aria-label="Stop penalty in USD" style="flex: 0 1 120px">
   <button>Plan route</button>
 </form>
 <div style="position: relative; flex: 1; display: flex;">

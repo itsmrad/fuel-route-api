@@ -47,7 +47,7 @@ class RouteApiTests(TestCase):
         body = r.json()
         self.assertEqual(set(body), {'start', 'finish', 'distance_miles', 'duration_hours', 'fuel_stops',
                                      'total_gallons_purchased', 'total_fuel_cost', 'cost_of_fuel_consumed',
-                                     'route', 'map_url', 'external_api_calls'})
+                                     'stop_penalty', 'route', 'map_url', 'external_api_calls'})
         self.assertEqual(body['start'], {'query': 'Dallas, TX', 'lat': 32.78, 'lon': -96.8})
         self.assertEqual((body['distance_miles'], body['duration_hours'], body['external_api_calls']), (630.0, 9.0, 1))
         self.assertEqual([s['name'] for s in body['fuel_stops']], ['S0', 'S1'])
@@ -56,7 +56,7 @@ class RouteApiTests(TestCase):
         self.assertAlmostEqual(body['total_fuel_cost'], sum(s['cost'] for s in body['fuel_stops']), delta=0.01)
         self.assertEqual(body['route']['type'], 'LineString')
         self.assertEqual(body['route']['coordinates'][-1], COORDS[-1])
-        self.assertEqual(body['map_url'], 'http://testserver/api/route/map/?start=Dallas%2C+TX&finish=East%2C+MS')
+        self.assertEqual(body['map_url'], 'http://testserver/api/route/map/?start=Dallas%2C+TX&finish=East%2C+MS&stop_penalty=15.0')
 
         r, get = self.get('/api/route/?start=dallas,  tx&finish=EAST, MS')
         self.assertEqual(get.call_count, 0)
@@ -66,6 +66,18 @@ class RouteApiTests(TestCase):
     def test_missing_param(self, _):
         r, _ = self.get('/api/route/?start=Dallas, TX')
         self.assertEqual((r.status_code, r.json()['error']), (400, 'missing_parameter'))
+
+    def test_stop_penalty(self, _):
+        r, _ = self.get()
+        self.assertEqual((r.json()['stop_penalty'], len(r.json()['fuel_stops'])), (15.0, 2))
+        r, get = self.get(URL + '&stop_penalty=0')
+        self.assertEqual(get.call_count, 1)  # own cache entry
+        self.assertEqual(r.json()['stop_penalty'], 0.0)
+        r, get = self.get(URL + '&stop_penalty=1000')  # one pricier stop beats two
+        self.assertEqual([s['name'] for s in r.json()['fuel_stops']], ['S1'])
+        for bad in ('-1', 'abc', 'nan', 'inf'):
+            r, _ = self.get(f'{URL}&stop_penalty={bad}')
+            self.assertEqual((r.status_code, r.json()['error']), (400, 'invalid_parameter'), bad)
 
     def test_unknown_location(self, _):
         r, _ = self.get('/api/route/?start=Dallas, TX&finish=Nowhere, ZZ')

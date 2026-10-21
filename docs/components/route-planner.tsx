@@ -50,8 +50,13 @@ function useDark() {
   );
 }
 
-async function planRoute(start: string, finish: string): Promise<State> {
-  const url = `/api/route/?${new URLSearchParams({ start, finish })}`;
+function routeUrl(start: string, finish: string, penalty: string) {
+  const q = new URLSearchParams({ start, finish });
+  if (penalty.trim()) q.set('stop_penalty', penalty.trim());
+  return `/api/route/?${q}`;
+}
+
+async function planRoute(url: string): Promise<State> {
   const t0 = performance.now();
   let res: Response;
   try {
@@ -74,6 +79,7 @@ async function planRoute(start: string, finish: string): Promise<State> {
 const n0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const n1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const usdOrNa = (v: number | null) => (v == null ? 'n/a' : usd.format(v));
 
 function hours(h: number) {
   const whole = Math.floor(h);
@@ -85,6 +91,7 @@ export function RoutePlanner() {
   const [start, setStart] = useState(PRESETS[1].start);
   const [finish, setFinish] = useState(PRESETS[1].finish);
   const [state, setState] = useState<State>({ phase: 'idle' });
+  const [penalty, setPenalty] = useState('');
   const [focus, setFocus] = useState<{ i: number; at: number } | null>(null);
   const dark = useDark();
 
@@ -92,8 +99,9 @@ export function RoutePlanner() {
     setStart(s);
     setFinish(f);
     setFocus(null);
-    setState({ phase: 'loading', url: `/api/route/?${new URLSearchParams({ start: s, finish: f })}` });
-    setState(await planRoute(s.trim(), f.trim()));
+    const url = routeUrl(s.trim(), f.trim(), penalty);
+    setState({ phase: 'loading', url });
+    setState(await planRoute(url));
   }
 
   function onSubmit(e: FormEvent) {
@@ -125,6 +133,23 @@ export function RoutePlanner() {
             </button>
             <Field icon={<MapPin className="size-4" />} label="Finish" value={finish} onChange={setFinish} />
           </div>
+          <label
+            title="USD per fuel stop (about 30 min of driver time). Higher means fewer stops; 0 means cheapest fuel only."
+            className="flex h-12 items-center gap-1.5 rounded-xl border bg-fd-background px-3 transition-colors focus-within:border-fd-primary/60 focus-within:ring-2 focus-within:ring-fd-primary/20 md:w-36"
+          >
+            <span className="text-[11px] uppercase tracking-wider text-fd-muted-foreground/80">$/stop</span>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              inputMode="decimal"
+              value={penalty}
+              onChange={(e) => setPenalty(e.target.value)}
+              placeholder="15"
+              aria-label="Stop penalty in USD"
+              className="tabular min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-fd-muted-foreground/70"
+            />
+          </label>
           <button
             type="submit"
             disabled={busy}
@@ -243,7 +268,7 @@ function Result({
           <Stat label="Distance" value={`${n0.format(plan.distance_miles)} mi`} />
           <Stat label="Drive time" value={hours(plan.duration_hours)} />
           <Stat label="Gallons bought" value={n1.format(plan.total_gallons_purchased)} />
-          <Stat label="Fuel stops" value={String(stops.length)} />
+          <Stat label="Fuel stops" value={String(stops.length)} hint={`${usd.format(plan.stop_penalty)} per stop`} />
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t bg-fd-muted/40 px-4 py-2.5 text-xs">
           <span
@@ -258,7 +283,7 @@ function Result({
             {n0.format(ms)} ms round trip
           </span>
           <span className="text-fd-muted-foreground">
-            Fuel burned over the trip: <span className="tabular text-fd-foreground">{usd.format(plan.cost_of_fuel_consumed)}</span>
+            Fuel burned over the trip: <span className="tabular text-fd-foreground">{usdOrNa(plan.cost_of_fuel_consumed)}</span>
           </span>
           <a
             href={plan.map_url}
@@ -278,7 +303,7 @@ function Result({
       {stops.length === 0 ? (
         <div className="rounded-2xl border px-4 py-4 text-sm text-fd-muted-foreground">
           No stops needed: {n0.format(plan.distance_miles)} miles fits in one 500-mile tank. The trip burns{' '}
-          {n1.format(plan.distance_miles / 10)} gallons, worth {usd.format(plan.cost_of_fuel_consumed)} at the cheapest corridor price.
+          {n1.format(plan.distance_miles / 10)} gallons, worth {usdOrNa(plan.cost_of_fuel_consumed)} at the cheapest corridor price.
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border">

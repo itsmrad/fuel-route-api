@@ -11,8 +11,8 @@ icon: Workflow
 1. **Resolve** `start` and `finish`. `City, ST` matches the Census table built by `load_stations`; `lat,lon` is parsed directly. Only other inputs fall back to Nominatim, one call each.
 2. **Route** with OSRM `/route/v1/driving`: one call, full GeoJSON geometry, distance and duration.
 3. **Find stations along the route.** An in-memory grid index (0.5° cells) narrows the 6,443 stations to the cells the route crosses; a station is kept when it lies within 10 miles of the polyline, and its mile marker is the cumulative distance of the nearest route point.
-4. **Optimize** the stops with the greedy described in [How the optimizer works](/docs/optimizer).
-5. **Respond** with JSON and cache it under the normalized `start|finish` key. `/api/route/map/` reads the same entry.
+4. **Optimize** the stops with the dynamic program described in [How the optimizer works](/docs/optimizer).
+5. **Respond** with JSON and cache it under the normalized `start|finish|stop_penalty` key. `/api/route/map/` reads the same entry.
 
 Internally the steps are three plain functions: `resolve(query) → {query, lat, lon, label, external}`, `get_route(a, b) → {coords, distance_miles, duration_hours}`, and `plan_fuel_stops(...)`. `external_api_calls` is `1` for OSRM plus `1` for each location that needed Nominatim.
 
@@ -22,7 +22,7 @@ Internally the steps are three plain functions: `resolve(query) → {query, lat,
 | --- | --- | --- |
 | OSRM route | 2–5 s | Public demo server. Dominates every cold request. |
 | `stations_along` | 18–30 ms | Dallas → Chicago keeps 189 corridor stations, NYC → LA 447. |
-| Optimizer | < 1 ms | O(n·k) over the corridor stations. |
+| Optimizer | 10–25 ms | O(n·F) DP: n corridor stations × 501 fuel levels. |
 | Cache hit | a few ms | No external calls, no recomputation. |
 
 ## Decisions

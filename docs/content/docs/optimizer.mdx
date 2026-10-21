@@ -1,12 +1,14 @@
 ---
 title: How the optimizer works
-description: Greedy "fill or not to fill", why it is optimal, and a worked example.
+description: Why greedy is optimal when stops are free, and the dynamic program the service runs once each stop has a cost.
 icon: Fuel
 ---
 
 Stations are sorted by mile marker along the route. The destination is a virtual station with price `0`. Fuel is tracked in miles of range: a 500-mile tank at 10 MPG holds 50 gallons.
 
-## The rule
+The service minimises **fuel cost + `stop_penalty` × number of stops** (default **$15 per stop**, about 30 minutes of driver time). With the penalty at `0`, a simple greedy is optimal, and it is the easiest way to see what a good plan looks like. With a penalty, the service runs a dynamic program instead.
+
+## Free stops: the greedy intuition
 
 Standing at a station with price `p` and some fuel left, look at every station within the next 500 miles:
 
@@ -14,7 +16,7 @@ Standing at a station with price `p` and some fuel left, look at every station w
 - **Nothing cheaper is in range.** Fill the tank here, then drive to the *cheapest* station in range.
 - **No station is in range** and the destination is further than 500 miles: return `422 unreachable`, naming the gap.
 
-## Why greedy is optimal
+### Why greedy is optimal when stops are free
 
 Every mile of the trip needs fuel bought somewhere before it. The cheapest station that can still reach a given mile is the best place to buy the fuel for it. The rule does exactly that:
 
@@ -23,7 +25,7 @@ Every mile of the trip needs fuel bought somewhere before it. The cheapest stati
 
 An exchange argument makes it formal: take any optimal plan that disagrees with greedy at the first station where they differ, move gallons from the more expensive station to the cheaper one, and the cost never increases. This is the classic gas-station problem (Khuller, Malekian, Mestre, 2007) on a line, where the greedy solution is exact.
 
-## Worked example
+### Worked example
 
 A 1,100-mile trip with six stations. Step through it, or shuffle the prices and watch the plan change.
 
@@ -38,8 +40,34 @@ A 1,100-mile trip with six stations. Step through it, or shuffle the prices and 
 
 Total: **60 gallons for $178.10**. Nothing is bought at A, and the truck drives straight past C: B bought exactly enough to reach the cheaper D.
 
+## Priced stops: a dynamic program
+
+On real corridors the greedy chases cents. NYC → Los Angeles has 447 corridor stations, and with free stops the cheapest plan makes 16 stops, many of them small top-ups to reach a station two cents cheaper. A stop costs time, so the service gives each one a price, and greedy is no longer optimal: it never weighs "one more stop" against "a few cents per gallon".
+
+The service solves it exactly with a dynamic program over **(station, fuel on arrival)**:
+
+- `dp[f]` is the cheapest way to arrive at the current station with `f` miles of fuel, for `f` from 0 to 500. It starts with a full tank at mile 0.
+- **At a station** with price `p`, either drive on (no cost), or stop: pay the penalty and fill from some `f0 ≤ f` up to `f`. That is `min over f0 ≤ f of dp[f0] + p·(f − f0) + penalty`. Rewritten as `p·f + penalty + min(dp[f0] − p·f0)`, the inner minimum is a running minimum, so one pass over the 501 levels handles the station.
+- **Driving** `d` miles to the next station shifts the array: `f` becomes `f − d`; negative fuel is dropped.
+- At the destination any `f ≥ 0` is fine. The cheapest one, followed back through stored back-pointers, gives the stops and how much each one bought.
+
+Complexity is **O(n · F)**: n corridor stations, F = 501 fuel levels. NYC → LA (447 stations) runs in about 22 ms in pure Python.
+
+Fuel is counted in **whole miles** (0.1 gal). Station positions round up to the next mile, and the tank cap rounds down, so every plan the DP returns can really be driven; the cost of that rounding is at most a fraction of a gallon per stop. The test suite checks the DP against a brute force that tries every purchase at every station, with and without a penalty.
+
+### Choosing the penalty
+
+| `stop_penalty` | NYC → LA stops | Fuel cost |
+| --- | --- | --- |
+| 0 | 16 | $698.92 |
+| 5–10 | 9 | $700.05 |
+| **15 (default)** | **7** | **$702.79** |
+| 20–30 | 7 | $702.79 |
+| 40 | 6 | $705.93 |
+
+$15 removes nine stops for $3.87 more fuel. Dallas → Chicago drops from 4 stops to 2 (+$0.14), Miami → Seattle from 20 to 8 (+$3.46). The penalty only steers the choice: `total_fuel_cost` is still fuel money only. Pass `stop_penalty=0` for the cheapest-fuel plan.
+
 ## Implementation notes
 
-- Complexity is O(n·k): n corridor stations (189 for Dallas → Chicago), k stations per 500-mile window. It runs in well under a millisecond.
-- `Station.price` is a `DecimalField`. Miles and gallons convert with `Decimal(str(x))`, so `Decimal × float` never happens and costs are exact to the cent.
+- `Station.price` is a `DecimalField`. The DP compares candidate plans in floats for speed; the chosen purchases are then priced in `Decimal` (gallons = whole miles ÷ 10), so the reported costs are exact to the cent.
 - Positions are city centroids, so a mile marker can be off by a few miles. See [Limits](/docs/limits).
