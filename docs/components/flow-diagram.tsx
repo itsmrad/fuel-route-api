@@ -5,13 +5,13 @@ const ROW1 = 24;
 const ROW2 = 160;
 
 const boxes: Box[] = [
-  { x: 8, y: ROW1, w: 124, title: 'Client', sub: 'browser · Postman' },
-  { x: 168, y: ROW1, w: 132, title: 'Caddy', sub: '/api/* → gunicorn' },
-  { x: 336, y: ROW1, w: 140, title: 'route_api', sub: 'Django view' },
-  { x: 512, y: ROW1, w: 118, title: 'Cache', sub: 'locmem · key' },
-  { x: 666, y: ROW1, w: 126, title: 'JSON', sub: '+ map_url' },
+  { x: 8, y: ROW1, w: 140, title: 'Client', sub: 'browser · Postman' },
+  { x: 180, y: ROW1, w: 150, title: 'Caddy', sub: '/api/* → gunicorn' },
+  { x: 364, y: ROW1, w: 120, title: 'route_api', sub: 'Django view' },
+  { x: 518, y: ROW1, w: 122, title: 'Cache', sub: 'file · per trip' },
+  { x: 674, y: ROW1, w: 118, title: 'JSON', sub: '+ map_url' },
   { x: 8, y: ROW2, w: 170, title: 'resolve()', sub: 'Census table', external: false },
-  { x: 214, y: ROW2, w: 170, title: 'OSRM /route', sub: '1 call · 2–5 s', external: true },
+  { x: 214, y: ROW2, w: 170, title: 'OSRM / Valhalla', sub: '1 call · 0.6–2.3 s', external: true },
   { x: 420, y: ROW2, w: 170, title: 'stations_along()', sub: 'grid index · 18–30 ms' },
   { x: 626, y: ROW2, w: 166, title: 'optimizer', sub: 'DP · ~20 ms' },
 ];
@@ -68,7 +68,7 @@ export function FlowDiagram() {
       <svg viewBox="0 0 800 260" className="min-w-[680px] w-full text-fd-foreground" role="img" aria-labelledby="flow-title">
         <title id="flow-title">
           Request flow: client to Caddy to the Django view; a cache hit returns JSON with zero external calls; a miss resolves
-          locations, calls OSRM once, finds stations along the route, runs the optimizer and caches the result.
+          locations, calls the router (OSRM or Valhalla) once, finds stations along the route, runs the optimizer and caches the result.
         </title>
         <defs>
           {[
@@ -81,11 +81,11 @@ export function FlowDiagram() {
           ))}
         </defs>
 
-        <Arrow d={`M132 ${r1} H166`} />
-        <Arrow d={`M300 ${r1} H334`} />
-        <Arrow d={`M476 ${r1} H510`} />
-        <Arrow d={`M630 ${r1} H664`} label="hit · 0 calls" lx={612} ly={ROW1 - 8} accent />
-        <Arrow d={`M571 ${ROW1 + H} V112 H93 V${ROW2 - 2}`} label="miss" lx={540} ly={106} />
+        <Arrow d={`M148 ${r1} H178`} />
+        <Arrow d={`M330 ${r1} H362`} />
+        <Arrow d={`M484 ${r1} H516`} />
+        <Arrow d={`M640 ${r1} H672`} label="hit · 0 calls" lx={618} ly={ROW1 - 8} accent />
+        <Arrow d={`M579 ${ROW1 + H} V112 H93 V${ROW2 - 2}`} label="miss" lx={548} ly={106} />
         <Arrow d={`M178 ${r2} H212`} />
         <Arrow d={`M384 ${r2} H418`} />
         <Arrow d={`M590 ${r2} H624`} />
@@ -100,7 +100,7 @@ export function FlowDiagram() {
           <tspan x={8} dy="15">Anything else: Nominatim, +1 each.</tspan>
         </text>
         <text x={214} y={ROW2 + H + 26} fontSize="11" fill="var(--color-fd-muted-foreground)">
-          <tspan x={214}>Full GeoJSON geometry.</tspan>
+          <tspan x={214}>Full route geometry.</tspan>
           <tspan x={214} dy="15">Dominates a cold request.</tspan>
         </text>
         <text x={420} y={ROW2 + H + 26} fontSize="11" fill="var(--color-fd-muted-foreground)">

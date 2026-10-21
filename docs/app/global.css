@@ -20,17 +20,17 @@
   --color-fd-card: oklch(0.97 0.005 78);
   --color-fd-card-foreground: oklch(0.2 0.012 60);
   --color-fd-border: oklch(0.88 0.01 70);
-  --color-fd-primary: oklch(0.56 0.165 45);
+  --color-fd-primary: oklch(0.52 0.165 45);
   --color-fd-primary-foreground: oklch(0.99 0.01 70);
   --color-fd-secondary: oklch(0.94 0.008 75);
   --color-fd-secondary-foreground: oklch(0.22 0.012 60);
   --color-fd-accent: oklch(0.93 0.025 65);
   --color-fd-accent-foreground: oklch(0.22 0.02 50);
-  --color-fd-ring: oklch(0.56 0.165 45);
+  --color-fd-ring: oklch(0.52 0.165 45);
 
   /* brand tokens used by the custom components */
-  --color-brand: oklch(0.56 0.165 45);
-  --color-brand-soft: oklch(0.56 0.165 45 / 0.1);
+  --color-brand: oklch(0.52 0.165 45);
+  --color-brand-soft: oklch(0.52 0.165 45 / 0.1);
   --color-road: oklch(0.2 0.012 60);
   --color-ok: oklch(0.52 0.13 150);
   --color-bad: oklch(0.55 0.19 28);
@@ -84,6 +84,9 @@ html > body[data-scroll-locked] {
   padding: 0.1em 0.38em;
   font-size: 0.86em;
   font-weight: 450;
+  /* a chip that wraps keeps its border and padding on both lines */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .prose :where(h1, h2, h3) {
@@ -93,6 +96,27 @@ html > body[data-scroll-locked] {
 
 .prose :where(table) {
   font-size: 0.925em;
+}
+
+/*
+ * WCAG AA for the few colours the libraries hard-code:
+ * Shiki's github themes (comments, light keywords) and the openapi GET badge in light mode.
+ */
+.shiki span[style*='--shiki-light:#6A737D'] {
+  --shiki-light: #57606a !important;
+  --shiki-dark: #8b949e !important;
+}
+.shiki span[style*='--shiki-light:#D73A49'] {
+  --shiki-light: #cf222e !important;
+}
+html:not(.dark) .text-green-600 {
+  color: #016630;
+}
+
+/* One focus ring for the custom components, in the brand colour. */
+.not-prose :is(a, button, summary):focus-visible {
+  outline: 2px solid var(--color-fd-ring);
+  outline-offset: 2px;
 }
 
 .tabular {
@@ -120,6 +144,30 @@ html > body[data-scroll-locked] {
 }
 .maplibregl-ctrl-attrib {
   font-size: 10px !important;
+}
+/* Map controls follow the theme instead of staying white on the dark style. */
+.maplibregl-ctrl-group,
+.maplibregl-ctrl.maplibregl-ctrl-attrib {
+  background-color: var(--color-fd-popover) !important;
+  color: var(--color-fd-muted-foreground);
+}
+.maplibregl-ctrl-attrib-button {
+  background-color: transparent !important;
+}
+.maplibregl-ctrl-group {
+  border: 1px solid var(--color-fd-border);
+  box-shadow: none !important;
+}
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--color-fd-border) !important;
+}
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib a {
+  color: var(--color-fd-muted-foreground) !important;
+}
+.dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+.dark .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
 }
 
 @keyframes route-draw {

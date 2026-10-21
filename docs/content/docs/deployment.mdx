@@ -77,7 +77,7 @@ uv sync --frozen
 uv run python manage.py migrate --noinput
 
 cd ../docs
-npm ci && npm run build
+npm ci && SITE_URL="https://$DOMAIN" npm run build   # absolute Open Graph image URLs
 
 sudo systemctl restart fuel-api fuel-docs
 ```
