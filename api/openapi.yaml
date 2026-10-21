@@ -293,7 +293,7 @@ components:
           examples: [130.53]
         cost_of_fuel_consumed:
           type: number
-          description: Gallons burned over the whole trip × average price paid (or the corridor average when no stop is needed).
+          description: Gallons burned over the whole trip × average price paid (or the cheapest corridor price when no stop is needed).
           examples: [284.22]
         route:
           $ref: '#/components/schemas/LineString'

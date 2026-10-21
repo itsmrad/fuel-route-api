@@ -278,7 +278,7 @@ function Result({
       {stops.length === 0 ? (
         <div className="rounded-2xl border px-4 py-4 text-sm text-fd-muted-foreground">
           No stops needed: {n0.format(plan.distance_miles)} miles fits in one 500-mile tank. The trip burns{' '}
-          {n1.format(plan.distance_miles / 10)} gallons, worth {usd.format(plan.cost_of_fuel_consumed)} at corridor prices.
+          {n1.format(plan.distance_miles / 10)} gallons, worth {usd.format(plan.cost_of_fuel_consumed)} at the cheapest corridor price.
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border">
