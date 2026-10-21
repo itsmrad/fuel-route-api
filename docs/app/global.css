@@ -145,6 +145,30 @@ html:not(.dark) .text-green-600 {
 .maplibregl-ctrl-attrib {
   font-size: 10px !important;
 }
+/* Map controls follow the theme instead of staying white on the dark style. */
+.maplibregl-ctrl-group,
+.maplibregl-ctrl.maplibregl-ctrl-attrib {
+  background-color: var(--color-fd-popover) !important;
+  color: var(--color-fd-muted-foreground);
+}
+.maplibregl-ctrl-attrib-button {
+  background-color: transparent !important;
+}
+.maplibregl-ctrl-group {
+  border: 1px solid var(--color-fd-border);
+  box-shadow: none !important;
+}
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--color-fd-border) !important;
+}
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib a {
+  color: var(--color-fd-muted-foreground) !important;
+}
+.dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
+.dark .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
 
 @keyframes route-draw {
   from {

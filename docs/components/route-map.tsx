@@ -67,8 +67,15 @@ export default function RouteMap({
       });
       map.current = m;
       m.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
+      // The OpenFreeMap styles reference a few icons their sprite lacks; a blank stand-in keeps the console clean.
+      m.setMissingStyleImageResolver((id) => {
+        m.addImage(id, { width: 1, height: 1, data: new Uint8Array(4) });
+      });
 
       m.on('load', () => {
+        // Draw the route above every road but under the labels that follow them, so city names stay readable.
+        const layers = m.getStyle().layers;
+        const labels = layers.slice(layers.findLastIndex((l) => l.type === 'line') + 1).find((l) => l.type === 'symbol')?.id;
         m.addSource('route', {
           type: 'geojson',
           data: { type: 'Feature', properties: {}, geometry: plan.route },
@@ -79,14 +86,14 @@ export default function RouteMap({
           source: 'route',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: { 'line-color': dark ? '#1a1410' : '#ffffff', 'line-width': 7 },
-        });
+        }, labels);
         m.addLayer({
           id: 'route',
           type: 'line',
           source: 'route',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: { 'line-color': dark ? '#f59a4a' : '#c4581a', 'line-width': 3.5 },
-        });
+        }, labels);
       });
 
       const ends: [RoutePlan['start'], string][] = [
