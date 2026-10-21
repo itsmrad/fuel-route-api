@@ -9,6 +9,8 @@ const apiOrigin = process.env.API_ORIGIN ?? 'http://127.0.0.1:8000';
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
+  // Docker copies only .next/standalone (+ static, public) into the runtime image.
+  output: 'standalone',
   // Django's URLs end in "/"; without this Next 308s /api/route/ -> /api/route.
   skipTrailingSlashRedirect: true,
   async redirects() {
