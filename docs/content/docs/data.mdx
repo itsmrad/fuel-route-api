@@ -1,0 +1,37 @@
+---
+title: Data & geocoding
+description: From a price CSV with no coordinates to 6,443 placed stations, offline.
+icon: Database
+---
+
+The provided `fuel-prices.csv` has a station ID, name, address, city, state and retail price. No coordinates. Addresses look like `I-44, EXIT 283 & US-69`, which no free geocoder resolves reliably. So stations are placed at the centroid of their city, using the US Census Gazetteer, once, in `manage.py load_stations`.
+
+## Pipeline
+
+| Step | Rows | What happens |
+| --- | --- | --- |
+| Read CSV | 8,151 | Raw rows. |
+| Dedupe by `OPIS Truckstop ID` | 6,738 | Duplicate IDs collapse; the cheapest price wins. |
+| Keep US states | 6,626 | Canadian rows (BC, ON, AB, SK…) are out of scope. |
+| Match city to Gazetteer | **6,443** | **97.2%** placed. The rest are logged and dropped. |
+
+## Matching
+
+`load_stations` downloads two 2024 Gazetteer files and builds one `(state, normalized name) → (lat, lon)` index:
+
+- **Places** (cities, towns, CDPs) first, then **county subdivisions**, which cover New England towns that are not places.
+- **Normalization** lowercases, strips accents (`Cañon` → `canon`), maps `Saint` to `St`, removes the legal suffix (`city`, `town`, `village`, `CDP`…) and collapses spaces, dots and hyphens, so `Mc Calla`, `De Witt` and `Brookpark` all match.
+- **Consolidated cities** get alias keys: `Athens-Clarke County unified government` also answers to `athens`, `Boise City city` to `boise`.
+- **Precedence:** exact name beats alias, place beats county subdivision, incorporated place beats CDP.
+- **Ambiguity:** when two distinct locations tie on all of that and sit more than ~14 miles apart, the key is dropped rather than guessed.
+
+The CSV city is matched unstripped, so `Junction City` never falls through to a place called `Junction`.
+
+## Limitations
+
+<Callout title="City centroid, not the station" type="warn">
+A station's position is its city's centroid, a few miles from the actual exit. The 10-mile corridor absorbs most of that error, and mile markers can be off by a few miles. The fix is to geocode station addresses once, offline, and store real coordinates.
+</Callout>
+
+- **Sparse regions.** The dataset has only 8 California stations, all near the Mexican border. NYC → LA runs its last ~273 miles with no station in reach, which is fine inside the 500-mile range, but it means a plan in the far West has fewer choices than the map suggests.
+- **No updates.** Prices are a snapshot. Re-run `load_stations` with a new CSV to refresh; it replaces the table in one transaction and refuses to wipe it if nothing matches.

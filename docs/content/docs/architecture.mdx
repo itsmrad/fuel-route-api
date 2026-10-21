@@ -1,0 +1,41 @@
+---
+title: Architecture
+description: One request, one external call, everything else in process.
+icon: Workflow
+---
+
+<FlowDiagram />
+
+## The request path
+
+1. **Resolve** `start` and `finish`. `City, ST` matches the Census table built by `load_stations`; `lat,lon` is parsed directly. Only other inputs fall back to Nominatim, one call each.
+2. **Route** with OSRM `/route/v1/driving`: one call, full GeoJSON geometry, distance and duration.
+3. **Find stations along the route.** An in-memory grid index (0.5° cells) narrows the 6,443 stations to the cells the route crosses; a station is kept when it lies within 10 miles of the polyline, and its mile marker is the cumulative distance of the nearest route point.
+4. **Optimize** the stops with the greedy described in [How the optimizer works](/docs/optimizer).
+5. **Respond** with JSON and cache it under the normalized `start|finish` key. `/api/route/map/` reads the same entry.
+
+Internally the steps are three plain functions: `resolve(query) → {query, lat, lon, label, external}`, `get_route(a, b) → {coords, distance_miles, duration_hours}`, and `plan_fuel_stops(...)`. `external_api_calls` is `1` for OSRM plus `1` for each location that needed Nominatim.
+
+## Where the time goes
+
+| Stage | Cost | Notes |
+| --- | --- | --- |
+| OSRM route | 2–5 s | Public demo server. Dominates every cold request. |
+| `stations_along` | 18–30 ms | Dallas → Chicago keeps 189 corridor stations, NYC → LA 447. |
+| Optimizer | < 1 ms | O(n·k) over the corridor stations. |
+| Cache hit | a few ms | No external calls, no recomputation. |
+
+## Decisions
+
+| Topic | Decision | Why |
+| --- | --- | --- |
+| Starting fuel | Full tank (500 mi) | "Total cost" is fuel bought on the way. `cost_of_fuel_consumed` covers short trips. |
+| Input | `City, ST` or `lat,lon` resolved locally | Zero calls for the common case. Nominatim only as a fallback. |
+| Routing | OSRM public server | No key, full geometry in one call. Swappable for self-hosted OSRM or OpenRouteService. |
+| Framework | Plain Django + `JsonResponse` | One endpoint. DRF would add more than it gives. |
+| Storage | SQLite `Station` table, loaded into memory on first request | 6.4k rows. Idiomatic, no extra service. |
+| Spatial search | Stdlib grid index | PostGIS, scipy or numpy are not needed for 6.4k points. |
+| Cache | Django locmem | One server. Redis when there are two. |
+| Money | `Decimal` end to end | Prices have 8 decimal places; never mix `Decimal` and `float`. |
+| CORS | None | The browser only talks to its own origin; `/api/*` is proxied. |
+| Dependencies | `django`, `requests`, `gunicorn` | Nothing else. |

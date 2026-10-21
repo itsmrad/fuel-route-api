@@ -1,0 +1,55 @@
+---
+title: Errors
+description: Every error is JSON with a machine-readable code and a human-readable detail.
+icon: TriangleAlert
+---
+
+```json
+{ "error": "unknown_location", "detail": "Could not resolve \"Springfeld, ZZ\" to a US location." }
+```
+
+`error` is stable and safe to branch on. `detail` is for people and may change.
+
+| Status | `error` | When | What to do |
+| --- | --- | --- | --- |
+| `400` | `missing_parameter` | `start` or `finish` is missing or empty. | Send both query parameters. |
+| `400` | `unknown_location` | The input is not a known `City, ST`, not `lat,lon`, and Nominatim found nothing in the USA. | Use `City, ST` with a two-letter state, or coordinates. |
+| `422` | `unreachable` | Some stretch of the route has no station within the 500-mile range. | Nothing to retry. `detail` names the gap's mile markers. |
+| `502` | `routing_provider_error` | OSRM or Nominatim failed, timed out, or returned no route. | Retry after a second; the public OSRM server allows 1 request/s. |
+
+## Examples
+
+<Tabs items={['400', '422', '502']}>
+<Tab value="400">
+
+```bash
+curl -s '/api/route/?start=Springfeld,%20ZZ&finish=Chicago,%20IL'
+```
+
+```json
+{ "error": "unknown_location", "detail": "Could not resolve \"Springfeld, ZZ\" to a US location." }
+```
+
+</Tab>
+<Tab value="422">
+
+```json
+{
+  "error": "unreachable",
+  "detail": "No fuel station between mile 1204.6 and mile 1731.9 (527.3 mi gap, range is 500 mi)."
+}
+```
+
+</Tab>
+<Tab value="502">
+
+```json
+{ "error": "routing_provider_error", "detail": "OSRM did not respond within 10 s." }
+```
+
+</Tab>
+</Tabs>
+
+## From the docs site
+
+When the route planner or the API playground gets no JSON back at all (Django not running, wrong `API_ORIGIN`), the Next.js proxy answers with a `500` HTML page. The planner reports that as "The API isn't running" with the command to start it.

@@ -1,0 +1,86 @@
+---
+title: Deployment
+description: One Lightsail instance, Caddy in front, two systemd units behind it.
+icon: Server
+---
+
+| Piece | Choice |
+| --- | --- |
+| Host | AWS Lightsail, Ubuntu 24.04, smallest plan, static IP, ports 80 and 443 open |
+| TLS + routing | Caddy, automatic HTTPS. No domain? `<ip>.sslip.io` still gets a valid certificate. |
+| API | gunicorn on `127.0.0.1:8000`, run by uv |
+| Docs | `next start` on `127.0.0.1:3000` |
+
+Caddy splits by path, so the browser sees a single origin and the API needs no CORS.
+
+```txt title="deploy/Caddyfile"
+{$DOMAIN} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}
+```
+
+<Callout title="Protect the OSRM quota">
+The public OSRM server allows about 1 request per second. Add a per-IP rate limit on `/api/route/` in Caddy so one client can't burn it for everyone. Cache hits never reach OSRM.
+</Callout>
+
+## systemd units
+
+```ini title="/etc/systemd/system/fuel-api.service"
+[Unit]
+Description=Fuel Route API (gunicorn)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/srv/fuel-route-api/api
+EnvironmentFile=/srv/fuel-route-api/.env
+ExecStart=/home/ubuntu/.local/bin/uv run gunicorn config.wsgi -w 3 -b 127.0.0.1:8000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```ini title="/etc/systemd/system/fuel-docs.service"
+[Unit]
+Description=Fuel Route API docs (Next.js)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/srv/fuel-route-api/docs
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start -- -p 3000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The `.env` file sets `DEBUG=False`, `SECRET_KEY` and `ALLOWED_HOSTS`. Nothing secret lives in the repo.
+
+## Deploying a change
+
+```bash title="deploy/deploy.sh"
+set -euo pipefail
+cd /srv/fuel-route-api && git pull --ff-only
+
+cd api
+uv sync --frozen
+uv run python manage.py migrate --noinput
+uv run python manage.py collectstatic --noinput
+
+cd ../docs
+npm ci && npm run build
+
+sudo systemctl restart fuel-api fuel-docs
+```
+
+`load_stations` runs once on a fresh box, and again only when the price CSV changes.

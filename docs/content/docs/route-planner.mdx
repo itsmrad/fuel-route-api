@@ -1,0 +1,10 @@
+---
+title: Route planner
+description: Plan a trip against the running API. Pick a preset or type two US places.
+icon: MapPinned
+full: true
+---
+
+<RoutePlanner />
+
+The planner calls `GET /api/route/` on this origin. In development `next.config.mjs` rewrites `/api/*` to Django at `API_ORIGIN` (default `http://127.0.0.1:8000`); in production Caddy does the same split. Latency is measured in the browser around `fetch`, so it includes the proxy hop.
