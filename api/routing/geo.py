@@ -1,0 +1,176 @@
+import csv
+import functools
+import io
+import math
+import re
+import unicodedata
+import urllib.request
+import zipfile
+
+import requests
+from django.conf import settings
+
+from routing.models import Station
+
+GAZETTEER = 'https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2024_Gazetteer/2024_Gaz_{}_national.zip'
+US_STATES = set(
+    'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY '
+    'NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split()
+)
+LSAD = re.compile(
+    r'\s+(city and borough|(consolidated|unified|metropolitan|metro) government|city|town|village|cdp|'
+    r'borough|township|municipality|plantation|ccd|ut|charter township|location|gore|grant|purchase)$'
+)
+
+UA = {'User-Agent': 'fuel-route-api/1.0 (github.com/itsmrad/fuel-route-api)'}
+NOMINATIM = 'https://nominatim.openstreetmap.org/search'
+OSRM = 'https://router.project-osrm.org/route/v1/driving/'
+USA = [(24, 50, -125, -66), (51, 72, -180, -129), (51, 53, 172, 180), (18.5, 22.5, -161, -154)]  # CONUS, AK, Aleutians, HI
+LATLON = re.compile(r'(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)')
+CITY_ST = re.compile(r'([^,]+?)\s*,\s*([A-Za-z]{2})')
+CELL = 0.5  # grid cell size, degrees
+MI_PER_DEG = 69.09
+
+
+class RoutingError(Exception):
+    pass
+
+
+def normalize(name, strip_lsad=True):
+    n = name.lower().replace('(balance)', '').strip()
+    if strip_lsad:
+        n = LSAD.sub('', n)
+    n = unicodedata.normalize('NFKD', n).encode('ascii', 'ignore').decode()  # Cañon -> canon
+    n = re.sub(r'\bsaint(e?)\b', r'st\1', n)
+    return re.sub(r"[\s.'-]", '', n)  # 'Mc Calla', 'De Witt', 'Brookpark' all collapse
+
+
+def aliases(name):
+    """Fallback keys for consolidated cities: 'Athens-Clarke County ...' -> athens, 'Boise City city' -> boise."""
+    out = [normalize(re.split(r'[-/,]', name)[0])]
+    stem = LSAD.sub('', name.lower().replace('(balance)', '').strip())
+    if stem.endswith(' city'):
+        out.append(normalize(stem[:-5]))
+    return out
+
+
+def gazetteer(kind):
+    path = settings.BASE_DIR / 'data' / 'census' / f'2024_Gaz_{kind}_national.zip'
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_suffix('.part')  # never cache a half-downloaded zip
+        urllib.request.urlretrieve(GAZETTEER.format(kind), part)
+        part.rename(path)
+    with zipfile.ZipFile(path) as z, z.open(z.namelist()[0]) as f:
+        rows = csv.reader(io.TextIOWrapper(f, encoding='utf-8'), delimiter='\t')
+        header = [h.strip() for h in next(rows)]
+        for row in rows:
+            r = dict(zip(header, row))
+            yield r['USPS'], r['NAME'], float(r['INTPTLAT']), float(r['INTPTLONG'])
+
+
+def build_index():
+    """(state, key) -> (lat, lon). Exact beats alias, place beats cousub, incorporated beats CDP.
+    Distinct locations tied on all three are dropped as ambiguous rather than guessed."""
+    rows = [(0, name.endswith(' CDP'), st, name, lat, lon) for st, name, lat, lon in gazetteer('place')]
+    rows += [(1, False, st, name, lat, lon) for st, name, lat, lon in gazetteer('cousubs')]
+    best = {}
+    for tier, cdp, st, name, lat, lon in rows:
+        for alias, key in [(False, normalize(name))] + [(True, a) for a in aliases(name)]:
+            rank, k = (alias, tier, cdp), (st, key)
+            if k not in best or rank < best[k][0]:
+                best[k] = (rank, (lat, lon))
+            elif rank == best[k][0] and best[k][1] and math.dist(best[k][1], (lat, lon)) > 0.2:  # ~14 mi
+                best[k] = (rank, None)
+    return {k: ll for k, (_, ll) in best.items() if ll}
+
+
+@functools.cache
+def places():
+    return build_index()
+
+
+def in_usa(lat, lon):
+    return any(a <= lat <= b and c <= lon <= d for a, b, c, d in USA)
+
+
+def resolve(query):
+    """'lat,lon' or 'City, ST' locally, else one Nominatim call. ValueError if unknown or outside the USA."""
+    q = query.strip()
+    if not q:
+        raise ValueError('empty location')
+    if m := LATLON.fullmatch(q):
+        lat, lon = float(m[1]), float(m[2])
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError(f'{query!r}: expected "lat,lon" with lat in [-90, 90] and lon in [-180, 180]')
+        if not in_usa(lat, lon):
+            raise ValueError(f'{query!r} is outside the USA')
+        return {'query': query, 'lat': lat, 'lon': lon, 'label': q, 'external': False}
+    if (m := CITY_ST.fullmatch(q)) and (ll := places().get((m[2].upper(), normalize(m[1], False)))):
+        return {'query': query, 'lat': ll[0], 'lon': ll[1], 'label': f'{m[1]}, {m[2].upper()}', 'external': False}
+    try:
+        r = requests.get(NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'},
+                         headers=UA, timeout=5)
+        r.raise_for_status()
+        hits = r.json()
+    except requests.RequestException as e:
+        raise RoutingError(f'geocoder unavailable: {e}') from e
+    if not hits:
+        raise ValueError(f'location not found in the USA: {query!r}')
+    lat, lon = float(hits[0]['lat']), float(hits[0]['lon'])
+    if not in_usa(lat, lon):
+        raise ValueError(f'{query!r} is outside the USA')
+    return {'query': query, 'lat': lat, 'lon': lon, 'label': hits[0]['display_name'], 'external': True}
+
+
+def get_route(start, finish):
+    """One OSRM call. coords are GeoJSON [lon, lat] pairs."""
+    # ponytail: public OSRM demo server, best-effort and 1 req/s; self-host OSRM or swap to OpenRouteService here
+    url = f"{OSRM}{start['lon']},{start['lat']};{finish['lon']},{finish['lat']}"
+    try:
+        data = requests.get(url, params={'overview': 'full', 'geometries': 'geojson'}, headers=UA, timeout=10).json()
+    except requests.RequestException as e:
+        raise RoutingError(f'routing provider unavailable: {e}') from e
+    if data.get('code') != 'Ok' or not data.get('routes'):
+        raise RoutingError(data.get('message') or f"no route ({data.get('code')})")
+    route = data['routes'][0]
+    return {'coords': route['geometry']['coordinates'], 'distance_miles': route['distance'] / 1609.344,
+            'duration_hours': route['duration'] / 3600}
+
+
+@functools.cache
+def grid():
+    # ponytail: loaded once per process (restart after load_stations), KD-tree/PostGIS if stations grow 100x
+    cells = {}
+    for s in Station.objects.all():
+        cells.setdefault((math.floor(s.lat / CELL), math.floor(s.lon / CELL)), []).append(s)
+    return cells
+
+
+def haversine(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 7917.6 * math.asin(math.sqrt(a))  # Earth diameter in miles
+
+
+def stations_along(coords, max_offset_miles=10):
+    """[(mile, Station)] within max_offset_miles of the route, sorted by mile; mile = nearest sampled route point."""
+    cells, best = grid(), {}
+    mile, last = 0.0, None
+    dy = math.ceil(max_offset_miles / MI_PER_DEG / CELL)
+    for k, (lon, lat) in enumerate(coords):
+        if k:
+            mile += haversine(coords[k - 1][1], coords[k - 1][0], lat, lon)
+        if last is not None and mile - last < 1 and k < len(coords) - 1:
+            continue  # sample ~1 point per mile
+        last = mile
+        cos = math.cos(math.radians(lat))
+        dx = math.ceil(max_offset_miles / (MI_PER_DEG * max(cos, 0.05)) / CELL)
+        ci, cj = math.floor(lat / CELL), math.floor(lon / CELL)
+        for i in range(ci - dy, ci + dy + 1):
+            for j in range(cj - dx, cj + dx + 1):
+                for s in cells.get((i, j), ()):
+                    d = MI_PER_DEG * math.hypot(s.lat - lat, (s.lon - lon) * cos)  # flat-earth is fine at 10 mi
+                    if d <= max_offset_miles and (s.id not in best or d < best[s.id][0]):
+                        best[s.id] = (d, mile, s)
+    return sorted(((m, s) for _, m, s in best.values()), key=lambda t: t[0])
