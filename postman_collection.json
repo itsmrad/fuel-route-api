@@ -1,0 +1,548 @@
+{
+  "info": {
+    "name": "Fuel Route API",
+    "description": "Cost-optimal fuel stops along a US driving route (500 mi range, 10 MPG). Set baseUrl to your deployment; defaults to a local runserver.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000"
+    }
+  ],
+  "item": [
+    {
+      "name": "Routes",
+      "item": [
+        {
+          "name": "Dallas, TX → Chicago, IL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has total_fuel_cost', () => pm.expect(body).to.have.property('total_fuel_cost'));",
+                  "pm.test('external_api_calls <= 3', () => pm.expect(body.external_api_calls).to.be.at.most(3));",
+                  "pm.test('response time < 15000 ms', () => pm.expect(pm.response.responseTime).to.be.below(15000));",
+                  "pm.test('at least one stop', () => pm.expect(body.fuel_stops.length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Typical cross-state trip. Cold: 1 external call (OSRM); repeat: 0 calls, served from cache.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Dallas, TX"
+                },
+                {
+                  "key": "finish",
+                  "value": "Chicago, IL"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "New York, NY → Los Angeles, CA",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has total_fuel_cost', () => pm.expect(body).to.have.property('total_fuel_cost'));",
+                  "pm.test('external_api_calls <= 3', () => pm.expect(body.external_api_calls).to.be.at.most(3));",
+                  "pm.test('response time < 15000 ms', () => pm.expect(pm.response.responseTime).to.be.below(15000));",
+                  "pm.test('several stops', () => pm.expect(body.fuel_stops.length).to.be.at.least(5));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Cross-country, ~2,800 mi. With the default $15 stop penalty the plan makes 7 stops.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=New%20York,%20NY&finish=Los%20Angeles,%20CA",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "New York, NY"
+                },
+                {
+                  "key": "finish",
+                  "value": "Los Angeles, CA"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Miami, FL → Seattle, WA",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has total_fuel_cost', () => pm.expect(body).to.have.property('total_fuel_cost'));",
+                  "pm.test('external_api_calls <= 3', () => pm.expect(body.external_api_calls).to.be.at.most(3));",
+                  "pm.test('response time < 15000 ms', () => pm.expect(pm.response.responseTime).to.be.below(15000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Longest diagonal in the lower 48.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=Miami,%20FL&finish=Seattle,%20WA",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Miami, FL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Seattle, WA"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Austin, TX → Dallas, TX (0 stops)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has total_fuel_cost', () => pm.expect(body).to.have.property('total_fuel_cost'));",
+                  "pm.test('external_api_calls <= 3', () => pm.expect(body.external_api_calls).to.be.at.most(3));",
+                  "pm.test('response time < 15000 ms', () => pm.expect(pm.response.responseTime).to.be.below(15000));",
+                  "pm.test('no stops', () => pm.expect(body.fuel_stops).to.have.lengthOf(0));",
+                  "pm.test('total_fuel_cost is 0', () => pm.expect(body.total_fuel_cost).to.eql(0));",
+                  "pm.test('cost_of_fuel_consumed > 0', () => pm.expect(body.cost_of_fuel_consumed).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Under 500 mi: the full starting tank covers it, so no stops and total_fuel_cost is 0. cost_of_fuel_consumed still reports the fuel used.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=Austin,%20TX&finish=Dallas,%20TX",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Austin, TX"
+                },
+                {
+                  "key": "finish",
+                  "value": "Dallas, TX"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dallas → Chicago, stop_penalty=0 (cheapest fuel)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has total_fuel_cost', () => pm.expect(body).to.have.property('total_fuel_cost'));",
+                  "pm.test('external_api_calls <= 3', () => pm.expect(body.external_api_calls).to.be.at.most(3));",
+                  "pm.test('response time < 15000 ms', () => pm.expect(pm.response.responseTime).to.be.below(15000));",
+                  "pm.test('stop_penalty echoed', () => pm.expect(body.stop_penalty).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "stop_penalty=0 drops the per-stop cost: the pure cheapest-fuel plan (more stops, slightly lower fuel cost).",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL&stop_penalty=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Dallas, TX"
+                },
+                {
+                  "key": "finish",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "stop_penalty",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "lat,lon input",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has total_fuel_cost', () => pm.expect(body).to.have.property('total_fuel_cost'));",
+                  "pm.test('external_api_calls <= 3', () => pm.expect(body.external_api_calls).to.be.at.most(3));",
+                  "pm.test('response time < 15000 ms', () => pm.expect(pm.response.responseTime).to.be.below(15000));",
+                  "pm.test('only the OSRM call (or cache)', () => pm.expect(body.external_api_calls).to.be.at.most(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Coordinates are parsed locally: 0 geocoding calls.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=32.7767,-96.797&finish=41.8781,-87.6298",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "32.7767,-96.797"
+                },
+                {
+                  "key": "finish",
+                  "value": "41.8781,-87.6298"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Free-text address (Nominatim fallback)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has total_fuel_cost', () => pm.expect(body).to.have.property('total_fuel_cost'));",
+                  "pm.test('external_api_calls <= 3', () => pm.expect(body.external_api_calls).to.be.at.most(3));",
+                  "pm.test('response time < 15000 ms', () => pm.expect(pm.response.responseTime).to.be.below(15000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Inputs that are not \"City, ST\" or \"lat,lon\" fall back to Nominatim, +1 external call each (3 total when cold).",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=1600%20Pennsylvania%20Ave%20NW,%20Washington,%20DC&finish=Times%20Square,%20New%20York",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "1600 Pennsylvania Ave NW, Washington, DC"
+                },
+                {
+                  "key": "finish",
+                  "value": "Times Square, New York"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Errors",
+      "item": [
+        {
+          "name": "400: missing finish",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is missing_parameter', () => pm.expect(pm.response.json().error).to.eql('missing_parameter'));",
+                  "pm.test('response time < 1000 ms', () => pm.expect(pm.response.responseTime).to.be.below(1000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Both start and finish are required.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=Dallas,%20TX",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Dallas, TX"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "400: unknown location",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is unknown_location', () => pm.expect(pm.response.json().error).to.eql('unknown_location'));",
+                  "pm.test('response time < 5000 ms', () => pm.expect(pm.response.responseTime).to.be.below(1000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Not a known US city and Nominatim finds nothing in the US.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=Springfeld,%20ZZ&finish=Dallas,%20TX",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Springfeld, ZZ"
+                },
+                {
+                  "key": "finish",
+                  "value": "Dallas, TX"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "400: invalid stop_penalty",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is invalid_parameter', () => pm.expect(pm.response.json().error).to.eql('invalid_parameter'));",
+                  "pm.test('response time < 1000 ms', () => pm.expect(pm.response.responseTime).to.be.below(1000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "stop_penalty must be a number >= 0.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL&stop_penalty=-5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Dallas, TX"
+                },
+                {
+                  "key": "finish",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "stop_penalty",
+                  "value": "-5"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Map & spec",
+      "item": [
+        {
+          "name": "Map page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('is HTML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('text/html'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Leaflet map of the route and stops. Reads the cached plan, so it adds no external calls after /api/route/.",
+            "url": {
+              "raw": "{{baseUrl}}/api/route/map/?start=Dallas,%20TX&finish=Chicago,%20IL",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "route",
+                "map",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Dallas, TX"
+                },
+                {
+                  "key": "finish",
+                  "value": "Chicago, IL"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "OpenAPI spec",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('is OpenAPI 3.1', () => pm.expect(pm.response.text()).to.include('openapi: 3.1'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "OpenAPI 3.1 spec for the API.",
+            "url": {
+              "raw": "{{baseUrl}}/api/openapi.yaml",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "openapi.yaml"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
