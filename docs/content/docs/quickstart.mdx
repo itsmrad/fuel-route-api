@@ -50,11 +50,17 @@ The docs site proxies `/api/*` to `http://127.0.0.1:8000`. Point it elsewhere wi
 ### Make a request
 
 ```bash
-curl -s 'http://127.0.0.1:8000/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL' | jq '{distance_miles, total_fuel_cost, stops: (.fuel_stops | length), external_api_calls}'
+curl -s 'http://127.0.0.1:8000/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL' \
+  | jq '{distance_miles, total_fuel_cost, stops: (.fuel_stops | length), external_api_calls}'
 ```
 
 ```json
-{ "distance_miles": 961, "total_fuel_cost": 133.52, "stops": 2, "external_api_calls": 1 }
+{
+  "distance_miles": 961,
+  "total_fuel_cost": 133.52,
+  "stops": 2,
+  "external_api_calls": 1
+}
 ```
 
 Send it again: `external_api_calls` drops to `0` and the response comes back in milliseconds.

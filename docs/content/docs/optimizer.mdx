@@ -32,7 +32,7 @@ A 1,100-mile trip with six stations. Step through it, or shuffle the prices and 
 <OptimizerViz />
 
 | At | Fuel on arrival | In range (next 500 mi) | Decision | Bought |
-| --- | --- | --- | --- | --- |
+| --- | ---: | --- | --- | ---: |
 | Start | 500 mi | A, B, C | Can't buy here. Drive to A. | — |
 | A · $3.40 | 380 mi | B $3.05 is cheaper | B is reachable already. Buy nothing. | — |
 | B · $3.05 | 200 mi | D $2.95 is cheaper | Need 310 mi, have 200. Buy 11 gal. | $33.55 |
@@ -58,7 +58,7 @@ Fuel is counted in **whole miles** (0.1 gal). Station positions round up to the 
 ### Choosing the penalty
 
 | `stop_penalty` | NYC → LA stops | Fuel cost |
-| --- | --- | --- |
+| --- | ---: | ---: |
 | 0 | 16 | $698.92 |
 | 5–10 | 9 | $700.05 |
 | **15 (default)** | **7** | **$702.79** |

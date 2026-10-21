@@ -164,6 +164,7 @@ export function OptimizerViz() {
             0
           </text>
           <polyline points={pts} fill="none" stroke="var(--color-brand)" strokeWidth="2" strokeLinejoin="round" />
+          {!done && <circle cx={x(cur.pos)} cy={fy(cur.fuelIn + cur.buy)} r={4} fill="var(--color-brand)" />}
         </svg>
       </div>
 

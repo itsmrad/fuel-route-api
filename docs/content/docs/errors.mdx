@@ -5,7 +5,10 @@ icon: TriangleAlert
 ---
 
 ```json
-{ "error": "unknown_location", "detail": "Could not resolve \"Springfeld, ZZ\" to a US location." }
+{
+  "error": "unknown_location",
+  "detail": "Could not resolve \"Springfeld, ZZ\" to a US location."
+}
 ```
 
 `error` is stable and safe to branch on. `detail` is for people and may change.
@@ -25,11 +28,14 @@ icon: TriangleAlert
 <Tab value="400">
 
 ```bash
-curl -s '/api/route/?start=Springfeld,%20ZZ&finish=Chicago,%20IL'
+curl -s 'http://127.0.0.1:8000/api/route/?start=Springfeld,%20ZZ&finish=Chicago,%20IL'
 ```
 
 ```json
-{ "error": "unknown_location", "detail": "Could not resolve \"Springfeld, ZZ\" to a US location." }
+{
+  "error": "unknown_location",
+  "detail": "Could not resolve \"Springfeld, ZZ\" to a US location."
+}
 ```
 
 </Tab>
@@ -46,7 +52,10 @@ curl -s '/api/route/?start=Springfeld,%20ZZ&finish=Chicago,%20IL'
 <Tab value="502">
 
 ```json
-{ "error": "routing_provider_error", "detail": "routing provider unavailable: Read timed out. (read timeout=5)" }
+{
+  "error": "routing_provider_error",
+  "detail": "routing provider unavailable: Read timed out. (read timeout=5)"
+}
 ```
 
 </Tab>
