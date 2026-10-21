@@ -26,7 +26,8 @@ export interface RoutePlan {
   fuel_stops: FuelStop[];
   total_gallons_purchased: number;
   total_fuel_cost: number;
-  cost_of_fuel_consumed: number;
+  cost_of_fuel_consumed: number | null;
+  stop_penalty: number;
   route: { type: 'LineString'; coordinates: number[][] };
   map_url: string;
   external_api_calls: number;

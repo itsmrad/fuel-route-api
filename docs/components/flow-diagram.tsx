@@ -13,7 +13,7 @@ const boxes: Box[] = [
   { x: 8, y: ROW2, w: 170, title: 'resolve()', sub: 'Census table', external: false },
   { x: 214, y: ROW2, w: 170, title: 'OSRM /route', sub: '1 call · 2–5 s', external: true },
   { x: 420, y: ROW2, w: 170, title: 'stations_along()', sub: 'grid index · 18–30 ms' },
-  { x: 626, y: ROW2, w: 166, title: 'optimizer', sub: 'greedy · < 1 ms' },
+  { x: 626, y: ROW2, w: 166, title: 'optimizer', sub: 'DP · ~20 ms' },
 ];
 
 function Node({ b }: { b: Box }) {

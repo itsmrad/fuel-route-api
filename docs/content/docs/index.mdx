@@ -16,7 +16,7 @@ Three choices carry the design:
 
 - **One routing call.** OSRM returns the full route geometry in a single request. Locations written as `City, ST` or `lat,lon` resolve against a local Census table, so they cost nothing.
 - **Offline geocoding.** The price CSV has no coordinates. Stations are placed at their city's Census centroid, computed once by `load_stations`.
-- **A provably optimal greedy.** On a line with a fixed tank, "fill or not to fill" is optimal and runs in under a millisecond. See [How the optimizer works](/docs/optimizer).
+- **An exact optimizer that counts stops.** A dynamic program over (station, fuel) minimises fuel cost plus $15 per stop, so NYC → LA takes 7 stops instead of 16 for $4 more fuel. It runs in about 20 ms. See [How the optimizer works](/docs/optimizer).
 
 ## The response at a glance
 
@@ -33,8 +33,9 @@ Three choices carry the design:
   "total_gallons_purchased": 42.5,
   "total_fuel_cost": 130.53,
   "cost_of_fuel_consumed": 284.22,
+  "stop_penalty": 15.0,
   "route": { "type": "LineString", "coordinates": [[-96.8, 32.78], "…"] },
-  "map_url": "https://<host>/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL",
+  "map_url": "https://<host>/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0",
   "external_api_calls": 1
 }
 ```
@@ -42,7 +43,8 @@ Three choices carry the design:
 | Field | Meaning |
 | --- | --- |
 | `total_fuel_cost` | USD spent at stops. Starts from a full tank, so short trips report `0`. |
-| `cost_of_fuel_consumed` | Gallons burned over the whole trip × average price paid. Meaningful for every trip length. |
+| `cost_of_fuel_consumed` | Gallons burned over the whole trip × average price paid, or the cheapest corridor price when nothing is bought. `null` only if the corridor has no station at all. |
+| `stop_penalty` | USD per stop used to choose the stops (query parameter, default `15`). Not included in `total_fuel_cost`. |
 | `external_api_calls` | `1` on a typical cold request, up to `3` with Nominatim fallbacks, `0` on a cache hit. |
 | `map_url` | An HTML map of the same trip. Reads the cache, so it adds no calls. |
 
