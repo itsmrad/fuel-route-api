@@ -100,7 +100,7 @@ export function FlowDiagram() {
           <tspan x={8} dy="15">Anything else: Nominatim, +1 each.</tspan>
         </text>
         <text x={214} y={ROW2 + H + 26} fontSize="11" fill="var(--color-fd-muted-foreground)">
-          <tspan x={214}>Full GeoJSON geometry.</tspan>
+          <tspan x={214}>Full route geometry.</tspan>
           <tspan x={214} dy="15">Dominates a cold request.</tspan>
         </text>
         <text x={420} y={ROW2 + H + 26} fontSize="11" fill="var(--color-fd-muted-foreground)">
