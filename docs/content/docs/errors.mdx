@@ -16,7 +16,8 @@ icon: TriangleAlert
 | `400` | `invalid_parameter` | `stop_penalty` is not a number, or is negative, `nan` or `inf`. | Send a number `>= 0`, or leave it out for the default `15`. |
 | `400` | `unknown_location` | The input is not a known `City, ST`, not `lat,lon`, and Nominatim found nothing in the USA. | Use `City, ST` with a two-letter state, or coordinates. |
 | `422` | `unreachable` | Some stretch of the route has no station within the 500-mile range. | Nothing to retry. `detail` names the gap's mile markers. |
-| `502` | `routing_provider_error` | OSRM or Nominatim failed, timed out, or returned no route. | Retry after a second; the public OSRM server allows 1 request/s. |
+| `422` | `no_route` | No road connects start and finish (Hawaii to the mainland). | Nothing to retry. |
+| `502` | `routing_provider_error` | OSRM or Nominatim failed or timed out. | Retry after a second; the public OSRM server allows 1 request/s. |
 
 ## Examples
 

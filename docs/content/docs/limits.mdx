@@ -12,7 +12,7 @@ Each shortcut is deliberate: it keeps the system to one process, one dependency 
 | **OSRM public demo server** | Best-effort, ~1 request/s, ~1.4–1.7 s per route. Dominates cold latency. | Self-hosted OSRM, or OpenRouteService with a free key. A one-function swap in `get_route`. |
 | **Sparse data in the West** | Only 8 California stations, all near the Mexican border. NYC → LA has no station for its last ~273 miles. | A fuller price feed. The optimizer needs no change. |
 | **Price snapshot** | Prices never update on their own. | Scheduled `load_stations` against a live feed. |
-| **In-process cache** (locmem) | Lost on restart; not shared between gunicorn workers. | Redis or Memcached when there is more than one box. |
+| **File cache** (`api/.cache/`, `CACHE_DIR`) | Local to one server. | Redis or Memcached when there is more than one box. |
 | **Grid index in memory** | Fine for 6.4k points, rebuilt per worker. | PostGIS with a GiST index past a few hundred thousand stations. |
 | **Single vehicle profile** | 500-mile range and 10 MPG are fixed. | Accept `range` and `mpg` as query parameters. |
 | **Full tank at start** | Trips under 500 miles report `total_fuel_cost: 0`. | `cost_of_fuel_consumed` covers it today; a `start_fuel` parameter would make it explicit. |

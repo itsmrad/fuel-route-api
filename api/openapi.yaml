@@ -6,7 +6,7 @@ info:
   description: |
     Give a start and a finish location in the USA. The API returns the driving route,
     the fuel stops that minimise cost for a truck with a 500-mile range at 10 MPG,
-    and the total fuel cost. Responses are cached per normalized start/finish pair.
+    and the total fuel cost. Routes are cached per resolved start/finish pair.
   license:
     name: MIT
     identifier: MIT
@@ -116,14 +116,22 @@ paths:
                   summary: Invalid stop_penalty
                   value: { error: invalid_parameter, detail: '"stop_penalty" must be a number >= 0 (USD per stop).' }
         '422':
-          description: No station within range for some stretch of the route (gap above 500 miles).
+          description: No station within range for some stretch of the route (gap above 500 miles), or no road at all.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-              example:
-                error: unreachable
-                detail: No fuel station between mile 1204.6 and mile 1731.9 (527.3 mi gap, range is 500 mi).
+              examples:
+                unreachable:
+                  summary: Fuel gap
+                  value:
+                    error: unreachable
+                    detail: No fuel station between mile 1204.6 and mile 1731.9 (527.3 mi gap, range is 500 mi).
+                no_route:
+                  summary: No road
+                  value:
+                    error: no_route
+                    detail: No driving route between start and finish (for example Hawaii to the mainland).
         '502':
           description: The routing or geocoding provider failed or timed out.
           content:
@@ -161,7 +169,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: Route has a gap longer than the 500-mile range.
+          description: Route has a gap longer than the 500-mile range, or no road connects start and finish.
           content:
             application/json:
               schema:
@@ -341,7 +349,7 @@ components:
         error:
           type: string
           description: Machine-readable error code.
-          enum: [missing_parameter, invalid_parameter, unknown_location, unreachable, routing_provider_error,
+          enum: [missing_parameter, invalid_parameter, unknown_location, unreachable, no_route, routing_provider_error,
                  method_not_allowed, not_found, server_error]
           examples: [unknown_location]
         detail:
