@@ -1,14 +1,15 @@
+import functools
 import hashlib
 import math
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.cache import cache
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET
+from django.views.defaults import page_not_found
 
 from routing import geo
 from routing.optimizer import Unreachable, plan_fuel_stops
@@ -50,21 +51,38 @@ def plan(start_q, finish_q):
     return result, 1 + start['external'] + finish['external']
 
 
+def error(status, code, detail):
+    return JsonResponse({'error': code, 'detail': detail}, status=status)
+
+
+def api_get(view):
+    """GET only, JSON 405 otherwise. csrf_exempt so a POST gets that 405, not CSRF's HTML 403."""
+    @csrf_exempt
+    @functools.wraps(view)
+    def wrapped(request):
+        if request.method not in ('GET', 'HEAD'):
+            r = error(405, 'method_not_allowed', 'Only GET is supported.')
+            r['Allow'] = 'GET, HEAD'
+            return r
+        return view(request)
+    return wrapped
+
+
 def plan_for(request):
-    """(result, None) or (None, (status, code, detail)) for the request's start/finish."""
+    """(result, None) or (None, JSON error response) for the request's start/finish."""
     start, finish = (request.GET.get(k, '').strip() for k in ('start', 'finish'))
     if not start or not finish:
-        return None, (400, 'missing_parameter', 'Both "start" and "finish" are required.')
+        return None, error(400, 'missing_parameter', 'Both "start" and "finish" are required.')
     try:
         result, calls = plan(start, finish)
     except ValueError as e:
-        return None, (400, 'unknown_location', f'Could not resolve to a US location: {e}')
+        return None, error(400, 'unknown_location', f'Could not resolve to a US location: {e}')
     except Unreachable as e:
         a, b = e.gap_start_mile, e.gap_end_mile
-        return None, (422, 'unreachable', f'No fuel station between mile {a:.1f} and mile {b:.1f} '
-                                          f'({b - a:.1f} mi gap, range is {RANGE_MILES} mi).')
+        return None, error(422, 'unreachable', f'No fuel station between mile {a:.1f} and mile {b:.1f} '
+                                               f'({b - a:.1f} mi gap, range is {RANGE_MILES} mi).')
     except geo.RoutingError as e:
-        return None, (502, 'routing_provider_error', str(e))
+        return None, error(502, 'routing_provider_error', str(e))
     query = urlencode({'start': start, 'finish': finish})
     result['start']['query'], result['finish']['query'] = start, finish  # cache hit may have other spelling
     result['map_url'] = request.build_absolute_uri(f"{reverse('route_map')}?{query}")
@@ -72,27 +90,33 @@ def plan_for(request):
     return result, None
 
 
-@csrf_exempt  # read-only JSON; lets a POST get 405 instead of a CSRF 403
-@require_GET
+@api_get
 def route_api(request):
     result, err = plan_for(request)
-    if err:
-        return JsonResponse({'error': err[1], 'detail': err[2]}, status=err[0])
-    return JsonResponse(result)
+    return err or JsonResponse(result)
 
 
-@require_GET
+@api_get
 def route_map(request):
     if not request.GET.get('start') and not request.GET.get('finish'):
         return render(request, 'routing/map.html', {})  # empty demo form
     result, err = plan_for(request)
-    return render(request, 'routing/map.html', {'plan': result, 'error': err and err[2]},
-                  status=err[0] if err else 200)
+    return err or render(request, 'routing/map.html', {'plan': result})
 
 
-@require_GET
+@api_get
 def openapi(request):
     path = settings.BASE_DIR / 'openapi.yaml'
     if not path.exists():
-        raise Http404('openapi.yaml not found')
+        return error(404, 'not_found', 'openapi.yaml is not deployed.')
     return FileResponse(path.open('rb'), content_type='application/yaml')
+
+
+def not_found(request, exception=None):
+    if request.path.startswith('/api/'):
+        return error(404, 'not_found', f'No endpoint at {request.path}')
+    return page_not_found(request, exception)
+
+
+def server_error(request):
+    return error(500, 'server_error', 'Internal server error.')

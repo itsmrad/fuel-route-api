@@ -9,3 +9,6 @@ urlpatterns = [
     path('api/route/map/', views.route_map, name='route_map'),
     path('api/openapi.yaml', views.openapi, name='openapi'),
 ]
+
+handler404 = views.not_found
+handler500 = views.server_error

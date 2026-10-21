@@ -82,7 +82,17 @@ class RouteApiTests(TestCase):
         self.assertEqual((r.status_code, r.json()['error']), (502, 'routing_provider_error'))
 
     def test_get_only(self, _):
-        self.assertEqual(Client(enforce_csrf_checks=True).post(URL).status_code, 405)
+        r = Client(enforce_csrf_checks=True).post(URL)
+        self.assertEqual((r.status_code, r.json()['error']), (405, 'method_not_allowed'))
+
+    def test_api_404_is_json(self, _):
+        r = self.client.get('/api/nope/')
+        self.assertEqual((r.status_code, r.json()['error']), (404, 'not_found'))
+
+    def test_openapi_served(self, _):
+        r = self.client.get('/api/openapi.yaml')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(b''.join(r.streaming_content).startswith(b'openapi:'))
 
     def test_map_page(self, _):
         r, get = self.get(URL.replace('/route/', '/route/map/'))
@@ -90,3 +100,5 @@ class RouteApiTests(TestCase):
         self.assertContains(r, 'leaflet')
         self.assertContains(r, '"S1"')
         self.assertEqual(self.client.get('/api/route/map/').status_code, 200)  # empty demo form
+        r, _ = self.get('/api/route/map/?start=Dallas, TX&finish=Nowhere, ZZ')
+        self.assertEqual((r.status_code, r.json()['error']), (400, 'unknown_location'))

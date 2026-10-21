@@ -15,7 +15,7 @@
   #map { flex: 1; min-height: 300px; }
   .panel { position: absolute; z-index: 1000; left: 12px; bottom: 24px; max-width: calc(100% - 24px); padding: 10px 14px;
            background: rgba(20, 20, 20, .92); border: 1px solid #333; border-radius: 8px; }
-  .panel b { color: #fff; } .error { color: #ff8a80; }
+  .panel b { color: #fff; }
   .stop { width: 24px; height: 24px; border-radius: 50%; background: #f2994a; color: #111; font-weight: 700;
           display: grid; place-items: center; border: 2px solid #fff; }
 </style>
@@ -28,8 +28,7 @@
 </form>
 <div style="position: relative; flex: 1; display: flex;">
   <div id="map"></div>
-  {% if error %}<div class="panel error">{{ error }}</div>
-  {% elif plan %}<div class="panel">
+  {% if plan %}<div class="panel">
     <b>{{ plan.distance_miles }} mi</b> · {{ plan.duration_hours }} h ·
     <b>${{ plan.total_fuel_cost }}</b> at {{ plan.fuel_stops|length }} stop{{ plan.fuel_stops|length|pluralize }}<br>
     {{ plan.total_gallons_purchased }} gal bought · fuel burned worth ${{ plan.cost_of_fuel_consumed }}
@@ -51,7 +50,7 @@
       L.circleMarker([p.lat, p.lon], { radius: 7, color: '#fff', fillColor: '#27ae60', fillOpacity: 1 }).bindPopup(p.query).addTo(map);
     const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
     plan.fuel_stops.forEach((s, i) => L.marker([s.lat, s.lon], { icon: L.divIcon({ className: '', html: `<div class="stop">${i + 1}</div>`, iconSize: [24, 24] }) })
-      .bindPopup(`<b>${i + 1}. ${esc(s.name)}</b><br>${esc(s.address)}, ${esc(s.city)}, ${s.state}<br>Mile ${s.mile} · $${s.price}/gal<br>${s.gallons} gal = <b>$${s.cost}</b>`)
+      .bindPopup(`<b>${i + 1}. ${esc(s.name)}</b><br>${esc(s.address)}, ${esc(s.city)}, ${esc(s.state)}<br>Mile ${s.mile} · $${s.price}/gal<br>${s.gallons} gal = <b>$${s.cost}</b>`)
       .addTo(map));
   }
 </script>
