@@ -1,0 +1,391 @@
+---
+title: Engineering decisions
+description: Every decision behind the API, the options rejected, what measurement changed the plan, and the result in numbers.
+icon: Scale
+---
+
+Twenty decisions across 19 merged pull requests, in the order they were made. Each one follows the same template: context, the options weighed, the decision, the measured result, and the ceiling it leaves. Results are written as *accomplished X, as measured by Y, by doing Z*. A number that was not measured is marked as such.
+
+## Impact at a glance
+
+<Cards>
+  <Card title="421 ms cold p50, 838 ms p95">
+    Sub-second first requests across 12 US routes, with **1 external call each**, by making one routing call per trip and doing geocoding, corridor search and optimization in process.
+  </Card>
+  <Card title="9.5 ms cached p50, 0 calls">
+    Repeat and re-priced requests (p95 23 ms over 240 cached and 36 `stop_penalty` variants) by caching the route on resolved coordinates and re-running only the optimizer.
+  </Card>
+  <Card title="25–33 s and a 502 → 0.84 s">
+    Miami → Seattle made reliable by finding that the time was the 818 KB GeoJSON download, not routing, and switching to polyline6 (125 KB).
+  </Card>
+  <Card title="$382.77 saved, 12.3%">
+    Fuel cost against a fill-when-low driver on 12 routes ($2,718.99 vs $3,101.76), by an exact dynamic program over station and fuel level.
+  </Card>
+  <Card title="17 → 7 stops for +$3.88">
+    A plan a driver would follow on NYC → LA, and 77 → 31 stops across 12 routes for +$12.19, by pricing each stop at $15 inside the optimizer.
+  </Card>
+  <Card title="97.2% placed, 0 request-time calls">
+    6,443 of 6,626 US stations geocoded offline from a CSV with no coordinates, by matching cities against the Census Gazetteer at load time.
+  </Card>
+</Cards>
+
+## Decision log
+
+### 1. Place stations offline with the Census Gazetteer
+
+**Context.** The price CSV has 8,151 rows and no coordinates. Addresses look like `I-44, EXIT 283 & US-69`, which free geocoders do not resolve.
+
+| Option | Why rejected |
+| --- | --- |
+| Geocode at request time (Nominatim) | 1 request/s policy, dozens of stations per route, exit-style addresses fail. |
+| Batch-geocode every address with a keyed API | Every reviewer would need a key; free tiers cap daily volume. |
+| **City centroid from Census 2024 Gazetteer** | Chosen. Public, offline, covers every US place. |
+
+**Decision.** `load_stations` dedupes by OPIS ID (6,738), keeps US states (6,626), and matches city + state against Census places, then county subdivisions (New England towns). Names are normalized (accents, `Saint` → `St`, legal suffixes, punctuation), consolidated cities get aliases, and a name that matches two places more than ~14 miles apart is dropped rather than guessed.
+
+**Result.** Placed **97.2% of US stations (6,443 of 6,626) with 0 API calls at request time**, up from 91% with a naive name match, by normalizing names and adding county subdivisions, prefix aliases and an ambiguity guard.
+
+**Trade-off.** A station sits at its city's centroid, a few miles from the exit. Revisited with real address geocoding in [decision 18](#18-geocode-addresses-once-with-geoapify-and-keep-the-centroid). CodeRabbit caught two bugs before merge: an empty match would have wiped the table (now aborts), and same-name places such as Highland, IN (two places 242 mi apart) needed disambiguation. [PR #1](https://github.com/itsmrad/fuel-route-api/pull/1)
+
+### 2. One repository: `api/` and `docs/`
+
+**Context.** The deliverable is an API, but a reviewer has to read, run and try it.
+
+| Option | Why rejected |
+| --- | --- |
+| Two repositories | Two clones, two CI setups, and the OpenAPI spec drifts between them. |
+| Django-only, docs in the README | No interactive playground, no map. |
+| **Monorepo: `api/` (Django) + `docs/` (Next.js)** | Chosen. One clone, one spec, one CI. |
+
+**Decision.** Move Django into `api/` with pure `git mv` renames; the docs site lives in `docs/` and reads `api/openapi.yaml` directly.
+
+**Result.** **One clone and one command run everything**, measured by `docker compose up` serving API and docs from the same checkout ([decision 15](#15-docker-one-command-run-then-cut-the-docs-image-59)), by keeping a single `openapi.yaml` that both Django and the docs generator read. [PR #2](https://github.com/itsmrad/fuel-route-api/pull/2)
+
+### 3. Optimizer v1: the exact greedy for free stops
+
+**Context.** Minimize fuel cost along a line of stations with a 500-mile tank. This is the gas-station problem.
+
+| Option | Why rejected |
+| --- | --- |
+| Fill up whenever low | Simple, but the optimizer beats it by [12.3% on 12 routes](#19-benchmark-the-final-numbers). |
+| LP / MILP solver | A heavy dependency for a 1-D problem with a known exact algorithm. |
+| **"To fill or not to fill" greedy (Khuller, Malekian, Mestre)** | Chosen. Exact when stops are free. |
+
+**Decision.** At each station, buy just enough to reach the first cheaper station in range, or fill up if none is cheaper. `Decimal` money throughout; gaps over 500 miles raise `Unreachable` with mile markers.
+
+**Result.** **Optimal plans in about 1 ms for 400 stations**, measured by matching a brute force on 300 seeded random instances, by implementing the greedy with a provable exchange argument.
+
+**Trade-off.** Optimal for fuel money only: on NYC → LA it made 16–17 stops, many of them top-ups to save cents. That finding drove [decision 9](#9-optimizer-v2-dynamic-program-with-a-per-stop-price). [PR #3](https://github.com/itsmrad/fuel-route-api/pull/3)
+
+### 4. Routing: the public OSRM server, one call per trip
+
+**Context.** The brief asks for a free routing API, ideally one call per request.
+
+| Option | Why rejected |
+| --- | --- |
+| OpenRouteService | Free key, 2,000 requests/day. |
+| GraphHopper | Free tier non-commercial, 500 credits/day. |
+| HERE, TomTom, Google | Account, key and billing setup for every reviewer. |
+| OSRM `overview=simplified` | 53 points coast to coast: too coarse for a 10-mile corridor. |
+| **OSRM demo server, `overview=full`** | Chosen. No key; distance, duration and full geometry in one call. |
+
+**Decision.** `get_route()` makes one OSRM call. `City, ST` and `lat,lon` inputs resolve locally, so only free-text addresses touch Nominatim.
+
+**Result.** **1 external call per cold request and 0 per cached one**, measured by `external_api_calls` (12 calls for 12 cold routes in the benchmark), by resolving locations against the Census table and taking full geometry from a single route call.
+
+**Trade-off.** A public best-effort server (about 1 request/s) with a car profile. Both limits came back later: truck routing in [decision 14](#14-truck-routing-valhalla-opt-in-car-stays-the-default), latency spikes in [decision 16](#16-routing-resilience-polyline6-one-failover-hard-deadlines). [PR #4](https://github.com/itsmrad/fuel-route-api/pull/4)
+
+### 5. Corridor search: a stdlib grid index, not PostGIS
+
+**Context.** For each route, find the stations within 10 miles of a polyline thousands of points long, out of 6,443.
+
+| Option | Why rejected |
+| --- | --- |
+| PostGIS `ST_DWithin` | A database server to run and ship for 6.4k points. |
+| scipy KD-tree / shapely | New compiled dependencies for one lookup. |
+| Every station × every route point | Millions of distance checks per request. |
+| **0.5° grid cells in a dict, built once per process** | Chosen. Pure Python, about 35 lines. |
+
+**Decision.** Bucket stations by cell, sample the route about once per mile, check only the cells the route crosses, and keep the cumulative mile of the nearest route point.
+
+**Result.** **Corridor search in 18 ms for Dallas → Chicago (189 stations) and 30 ms for NYC → LA (447)**, measured live on full route geometry at the time (187 and 448 stations after [decision 18](#18-geocode-addresses-once-with-geoapify-and-keep-the-centroid)), by indexing stations in a 0.5° grid. The largest gap between sampled route points is 3.9 mi, so no station within the corridor is skipped.
+
+**Trade-off.** In memory and rebuilt per worker (41 ms at startup). PostGIS with a GiST index is the move past a few hundred thousand stations. [PR #4](https://github.com/itsmrad/fuel-route-api/pull/4)
+
+### 6. Python tooling: uv
+
+**Context.** Reviewers should get the same Python and the same dependency versions on the first try.
+
+| Option | Why rejected |
+| --- | --- |
+| `pip` + `requirements.txt` | No lockfile with hashes, no interpreter pinning. |
+| Poetry | Another tool to install; does not manage the Python version itself. |
+| **uv** (`pyproject.toml`, `uv.lock`, `.python-version`) | Chosen. Installs Python 3.14 and the locked set in one step. |
+
+**Result.** **Same pins everywhere**, measured by CI running `uv sync --locked` plus all 39 tests in 13 s, by committing `uv.lock` and `.python-version`. No standalone timing of uv itself was taken. [PR #5](https://github.com/itsmrad/fuel-route-api/pull/5)
+
+### 7. The endpoint: plain Django, a call budget in every response
+
+**Context.** One `GET` endpoint that returns the route, the stops and the cost.
+
+| Option | Why rejected |
+| --- | --- |
+| Django REST Framework | Serializers, routers and a browsable API for one read-only endpoint. |
+| FastAPI | The brief asks for Django. |
+| **`JsonResponse` + `{error, detail}` errors** | Chosen. Three runtime dependencies: `django`, `requests`, `gunicorn`. |
+
+**Decision.** `GET /api/route/` resolves, routes, matches and optimizes. Every response reports `external_api_calls`, so the call budget is visible, not claimed. The route line is downsampled to at most 5,000 points at 5 decimals (matching uses the full line). `wsgi.py` warms the place index (~484 ms) and station grid (41 ms) so the first request does not pay for them. A Leaflet `/api/route/map/` page reuses the same code path.
+
+**Result.** **A working contract on day one**, measured by Dallas → Chicago at 1.74 s cold and 29 ms cached with responses of 104–109 KB raw (31–33 KB gzip), by keeping the view a thin wrapper around three plain functions. [PR #6](https://github.com/itsmrad/fuel-route-api/pull/6)
+
+### 8. Docs: Fumadocs, an OpenAPI playground and a route planner
+
+**Context.** A reviewer should be able to try the API without reading code.
+
+| Option | Why rejected |
+| --- | --- |
+| README only | No way to try a request or see stops on a map. |
+| Swagger UI served by Django | A playground, but no guides, search or map. |
+| Hosted docs (Mintlify, GitBook) | Account, and the docs leave the repo. |
+| **Fumadocs on Next.js 16** | Chosen. MDX guides, generated API reference with a playground, custom React for the planner. |
+
+**Decision.** The API reference is generated from `api/openapi.yaml` (fumadocs-openapi). The route planner uses MapLibre with OpenFreeMap tiles (no key). Next rewrites `/api/*` to Django, so the browser stays on one origin and the API needs no CORS; Fumadocs search moved to `/search` so the proxy can own all of `/api/*`. A Postman collection covers the same contract.
+
+**Result.** **A contract that is tried, not only described**, measured by 12 Postman requests with 48 of 48 assertions passing under newman, by generating the reference from the same spec Django serves. [PR #7](https://github.com/itsmrad/fuel-route-api/pull/7), [PR #9](https://github.com/itsmrad/fuel-route-api/pull/9)
+
+### 9. Optimizer v2: dynamic program with a per-stop price
+
+**Context.** The greedy was exact and impractical: 16–17 stops coast to coast. Greedy cannot weigh "one more stop" against "a few cents per gallon".
+
+| Option | Why rejected |
+| --- | --- |
+| Greedy + merge nearby stops | Heuristic, no optimality guarantee. |
+| Minimum price-gap threshold | Still chases cents in a different way; no clean objective. |
+| MILP solver | Dependency, and slower than a DP for one dimension of fuel. |
+| **DP over (station, fuel on arrival in whole miles)** | Chosen. Exact for fuel cost + `stop_penalty` × stops. |
+
+**Decision.** `dp[f]` is the cheapest way to arrive with `f` miles of fuel (0–500). Stopping costs `p·f + penalty + min(dp[f0] − p·f0)`, a running minimum, so each station is one pass: O(n·F). Positions round up to whole miles so every plan is drivable; chosen purchases are priced in `Decimal`. Default $15, about 30 minutes of driver time.
+
+| `stop_penalty` | NYC → LA stops | Fuel cost |
+| --- | ---: | ---: |
+| 0 | 17 | $698.91 |
+| 5–10 | 9 | $700.04 |
+| **15 (default)** | **7** | **$702.79** |
+| 40 | 6 | $705.93 |
+
+**Result.** **NYC → LA from 17 stops to 7 for $3.88 more fuel (0.56%)**, and **77 → 31 stops across 12 routes for +$12.19**, measured on live routes, by solving fuel cost plus a per-stop price exactly. 450 stations × 501 levels run in ~22 ms in pure Python; the DP matches brute force on 300 instances without a penalty and 100 with one.
+
+**Trade-off.** The penalty is one global number; it steers choices and never appears in `total_fuel_cost`. `stop_penalty=0` returns the cheapest-fuel plan. [PR #8](https://github.com/itsmrad/fuel-route-api/pull/8)
+
+### 10. CI on every pull request
+
+**Context.** Ten pull requests in, every change still depended on remembering to run tests and a docs build.
+
+**Decision.** GitHub Actions, two parallel jobs: `api` (`uv sync --locked`, `manage.py test`, network fully mocked) and `docs` (`npm ci`, `npm run build`, `npm run types:check`). Superseded runs are cancelled. Checkout uses `persist-credentials: false` (a CodeRabbit finding).
+
+**Result.** **Every merge gated on tests, build and types**, measured by 27 of 27 recorded runs green and a latest run of 13 s (api) and 43 s (docs), by keeping tests free of network calls. [PR #10](https://github.com/itsmrad/fuel-route-api/pull/10)
+
+### 11. Cache the route, not the response
+
+**Context.** v1 cached the whole response on the query strings, in `locmem`. A new spelling or a new `stop_penalty` re-routed; each gunicorn worker had its own cache.
+
+| Option | Why rejected |
+| --- | --- |
+| Whole response, keyed on query strings | `dallas  ,  tx` or a penalty change costs a full OSRM call. |
+| `locmem` | Per worker: a second worker re-routes and misreports `external_api_calls`. |
+| Redis | A second service for one box. |
+| **Route cached on vehicle + resolved coordinates, in `FileBasedCache`** | Chosen. Shared by all workers on the box, no extra service. |
+
+**Decision.** Cache distance, the downsampled line and corridor stations on `vehicle` + coordinates rounded to 4 dp; re-run only the optimizer. Nominatim answers cached 30 days and throttled to 1 request/s; failover routes cached 10 minutes so the primary is retried soon.
+
+**Result.** **A `stop_penalty` change from 1.08–1.48 s to 15–33 ms and a respelled city from 1.59–4.10 s to 13–28 ms, both at 0 external calls**, by keying the cache on what OSRM actually receives. Final benchmark: cached p50 9.5 ms, penalty variants p50 9.4 ms.
+
+**Trade-off.** An exact repeat got slower at the time (9–10 ms → 13–42 ms) because the optimizer re-runs; accepted for never re-routing. The file cache is local to one server. [PR #11](https://github.com/itsmrad/fuel-route-api/pull/11)
+
+### 12. Reuse one HTTP session
+
+**Context.** Profiling a cold request from the dev machine: DNS 0.44 s, TCP 0.16 s, TLS 0.18 s, OSRM server time 0.17 s. Most of a call was connection setup.
+
+**Decision.** One module-level `requests.Session` (keep-alive) for OSRM, Valhalla and Nominatim.
+
+**Result.** **About 330 ms off every routing call after the first in a process**, measured as 881 ms → 526–555 ms per call, by keeping the TLS connection alive. [PR #11](https://github.com/itsmrad/fuel-route-api/pull/11)
+
+**Trade-off.** The first call per worker still pays the handshake. PR #11 also added a one-retry adapter on 429/5xx; [decision 16](#16-routing-resilience-polyline6-one-failover-hard-deadlines) removed it.
+
+### 13. Hardening and dead-code removal
+
+**Context.** An independent review ([open-code-review](#review--quality-process)) found 0 critical, 0 high, 2 medium and 7 low issues.
+
+**Decision.** Escape start/finish in the map page popups (XSS); `DEBUG` off unless set (only `manage.py` turns it on locally); strip `ALLOWED_HOSTS` entries; remove six unused Django apps (admin, auth, contenttypes, sessions, messages, staticfiles) plus CSRF middleware; reject `lat,lon` outside the US (the 49th-parallel split keeps Vancouver out); Gazetteer download with a 60 s timeout.
+
+**Result.** **All 9 review findings closed**, measured by 27 tests passing on the smaller app, by fixing the two medium issues and deleting the surface the API never used. [PR #12](https://github.com/itsmrad/fuel-route-api/pull/12)
+
+**Trade-off.** The US check is a set of boxes: southern Ontario and northern Mexico still pass.
+
+### 14. Truck routing: Valhalla opt-in, car stays the default
+
+**Context.** Spotter plans for trucks. OSRM's public server only routes cars, so low bridges and truck-restricted roads are not avoided.
+
+| Option | Why rejected |
+| --- | --- |
+| GraphHopper / ORS truck profiles | Keys and daily quotas. |
+| Self-hosted Valhalla | Right answer in production; a US build is out of scope for a take-home. |
+| **Public FOSSGIS Valhalla, `costing=truck`, opt-in** | Chosen. Class 8 dimensions (4.11 m, 2.6 m, 21.64 m, 36.3 t), no key. |
+
+| Dallas → Chicago | OSRM car | Valhalla truck |
+| --- | --- | --- |
+| Distance | 966.5 mi | 965.8 mi |
+| ETA | 17.1 h | 15.0 h |
+| p50 latency | 0.61 s | 1.07 s |
+
+**Decision.** `vehicle=truck` calls Valhalla and falls back to OSRM car on failure (`routing.fallback: true`). Trips over 1,500 km straight-line skip Valhalla, because the public server rejects them (error 154). Default stays `car`.
+
+**Result.** **Truck-legal routes on request at +460 ms p50**, measured on Dallas → Chicago, by adding a Valhalla path that never blocks a plan. Default `car` because NYC → LA and Miami → Seattle are rejected by the 1,500 km cap, so a truck default would fall back on exactly the long hauls this API is for, while adding 460 ms where routes differ by under a mile.
+
+**Trade-off.** Long trucks still get a car route. Self-hosted Valhalla lifts the cap and lets `truck` become the default. [PR #13](https://github.com/itsmrad/fuel-route-api/pull/13)
+
+### 15. Docker: one-command run, then cut the docs image 59%
+
+**Context.** Reviewers should not need uv, Node and a Census download to try it.
+
+**Decision.** `api/Dockerfile` runs `migrate` and `load_stations` at build, so the image ships with data; gunicorn `-w 2 --threads 4 -k gthread` because requests mostly wait on OSRM; non-root user; `SECRET_KEY` overridable by env (a Kilo finding). `compose.yaml` starts docs after the API is healthy; host ports are overridable. Then Next's `output: 'standalone'` for the docs image.
+
+**Result.** **`docker compose up` serves API and docs in one step**, verified by Dallas → Chicago returning 200 with $133.52 and every docs page returning 200 through the proxy, by baking data into the image. **Docs image from 1.12 GB to 462 MB (−59%)**, by shipping only `.next/standalone`, static assets and the map worker.
+
+**Trade-off.** API image 336 MB; a cold build takes about 7.5 minutes on the dev machine. [PR #14](https://github.com/itsmrad/fuel-route-api/pull/14), [PR #17](https://github.com/itsmrad/fuel-route-api/pull/17)
+
+### 16. Routing resilience: polyline6, one failover, hard deadlines
+
+**Context.** Miami → Seattle took 25–33 s, over the 10 s timeout, and returned 502. The hidden retry from decision 12 repeated the timed-out call, doubling time-to-502 without showing in `external_api_calls`.
+
+| Miami → Seattle request | Bytes | Time |
+| --- | ---: | ---: |
+| `overview=false` (server compute only) | 0.6 KB | 0.53 s |
+| `geometries=geojson` (before) | 818 KB | 2.6–2.8 s |
+| same, gzip | 287 KB | 8.9 s |
+| `geometries=polyline6` (after) | 125 KB | 1.04 s |
+
+| Option | Why rejected |
+| --- | --- |
+| Raise the timeout | A 30 s request is a failure even when it succeeds. |
+| Retry the same host | Doubles the wait on a slow server. |
+| **polyline6 + one call to a second OSRM host + 8 s wall-clock cap** | Chosen. Smaller payload, a different server on failure, bounded worst case. |
+
+**Decision.** Request `geometries=polyline6` (decoded with the stdlib decoder already used for Valhalla). Remove the retry. On a timeout, connection error or bad reply, make one call to the FOSSGIS OSRM server. Run every external call through a thread future abandoned after 8 s wall clock, so a server trickling bytes is cut off. Broken geometry fails over instead of raising a 500.
+
+**Result.** **Miami → Seattle from 25–33 s and a 502 to 0.84 s cold**, with Dallas → Chicago at 0.88 s and NYC → LA at 0.89 s, by cutting the payload 6.5× and bounding each call. Worst case is now at most 3 routing calls and a 502 within 16 s (car) or 24 s (truck), under gunicorn's 30 s worker timeout.
+
+**Trade-off.** The public servers stay erratic: one cold Miami → Seattle re-run took 5.2 s (under the cap). [PR #15](https://github.com/itsmrad/fuel-route-api/pull/15)
+
+### 17. Docs visual QA as a measured pass
+
+**Context.** The docs are the first thing a reviewer sees; nobody had looked at every page on a phone or in light mode.
+
+**Decision.** Playwright over 13 routes × 2 viewports (1440, 390) × 2 themes = 52 full-page screenshots, plus interactions (search, theme toggle, planner presets and errors, playground, step-through), axe-core on every page in both themes, an internal-link crawl, console capture and CLS.
+
+**Result.** **19 findings (2 high, 8 medium, 9 low) found and fixed**, measured by 0 axe contrast violations, 0 broken internal links, CLS 0 on every page and 0 console errors in a production build, by screenshotting every page in every mode and re-checking after each fix. Highlights: an unstyled 404 now uses the docs shell; mobile planner inputs crushed to 29 px; light-theme contrast at 3.98:1 and 2.95:1 raised to AA; `og:image` pointing at localhost in production.
+
+**Trade-off.** Remaining axe notes are inside Fumadocs and fumadocs-openapi internals. [PR #16](https://github.com/itsmrad/fuel-route-api/pull/16)
+
+### 18. Geocode addresses once with Geoapify, and keep the centroid
+
+**Context.** The known ceiling from decision 1: stations sit at city centroids. Would real coordinates change any plan?
+
+| Option | Why rejected |
+| --- | --- |
+| Geocode at request time | Keys and quota on every request. |
+| Accept every geocoder hit | Many hits are the city, or a same-named place elsewhere. |
+| **One-time batch, strict filter, committed CSV** | Chosen. Nobody else needs a key; re-runs resume. |
+
+**Decision.** `geocode_stations` dedupes 6,443 stations to 6,075 addresses, sends the 5,000 highest-priority (interstates first) within the 3,000 credits/day free tier (~2,585 credits), and keeps a hit only if it is a building, street or amenity, confidence ≥ 0.5, shares a number with the address, and lies within 25 mi of the centroid. Results go to `api/data/station_coords.csv`.
+
+| Route | Corridor stations | Fuel cost | Stops |
+| --- | --- | --- | --- |
+| Dallas → Chicago | 189 → 187 | $133.52 → $133.52 | 2 → 2 |
+| NYC → LA | 447 → 448 | $702.79 → $702.79 | 7 → 7 |
+| Miami → Seattle | 382 → 382 | $853.01 → $853.01 | 8 → 8 |
+
+**Result.** **The centroid approach validated with data**: 741 stations (11.5%) moved, median 1.7 mi and p90 5.0 mi, and **no plan changed** on the three reference routes, by geocoding once and comparing plans before and after. The 10-mile corridor already absorbs centroid error.
+
+**Trade-off.** Most addresses are `I-55, EXIT 180`, which geocoders resolve only to the city. The real fix is an exit-number lookup against OSM `motorway_junction` nodes. 1,075 addresses are still pending; re-running the command sends only those. [PR #18](https://github.com/itsmrad/fuel-route-api/pull/18)
+
+### 19. Benchmark: the final numbers
+
+**Context.** Numbers had been measured ad hoc across PRs, on runserver, on different days. Claims needed one reproducible run.
+
+**Decision.** `manage.py benchmark` (stdlib only): 12 US routes against a running gunicorn (`-w 2 --threads 4 -k gthread`, the Docker config), each once cold, 20 times cached and once per `stop_penalty` in 0/15/40; in-process stage timing; and a fuel-cost comparison against a naive driver who fills to full when the next station would leave under 100 miles. Full tables in [Benchmarks](/docs/benchmarks).
+
+| Phase | Requests | p50 | p95 | External calls |
+| --- | ---: | ---: | ---: | ---: |
+| Cold | 12 | 421 ms | 838 ms | 1 each |
+| Cached | 240 | 9.5 ms | 23 ms | 0 |
+| `stop_penalty` variant | 36 | 9.4 ms | 23 ms | 0 |
+
+**Result.** **$382.77 (12.3%) saved against a naive driver across 12 routes** ($2,718.99 vs $3,101.76, 31 stops vs 29), and **a cached request in 9.1 ms of server compute** (optimizer 6.6 ms, JSON 1.6 ms, cache read 0.8 ms), by measuring every claim in one reproducible command. For scale, PR #6 measured 1.39–1.74 s cold on runserver before the routing and caching work; the setups differ, so that is context, not a controlled before/after.
+
+**Trade-off.** One laptop, one client, sequential requests, public OSRM: cold numbers are network-bound and will vary. [PR #19](https://github.com/itsmrad/fuel-route-api/pull/19)
+
+### 20. What was deliberately left out
+
+| Not built | Why | When to add it |
+| --- | --- | --- |
+| Django REST Framework | One read-only endpoint; `JsonResponse` is enough. | Many resources, auth, pagination. |
+| PostGIS | 6,443 points fit a 0.5° grid in memory. | Hundreds of thousands of stations. |
+| Redis | The file cache is shared by all workers on one box. | A second server. |
+| Celery / background jobs | Every request finishes in one routing call. | Batch planning for a fleet. |
+| Hours of service | A separate problem (Spotter's other take-home). | Combined trip planning. |
+| EIA diesel prices | Regional weekly averages, coarser than per-station OPIS prices. | A live price feed is needed. |
+| Keyed routing APIs | Every reviewer would need a key. | Production traffic. |
+| Ask AI in the docs | Needs an LLM key and hosting; `llms.txt` and `llms-full.txt` already expose the docs to any assistant. | A hosted deployment with a budget. |
+
+## Findings that changed the plan
+
+Measurements that overturned an assumption, and what changed because of them.
+
+- **OSRM was slow because of the download, not the routing.** Server compute for Miami → Seattle was 0.53 s; the 818 KB GeoJSON took 2.6–8.9 s to arrive. Switching to polyline6 (125 KB) took the request from 25–33 s to 0.84 s. [Decision 16](#16-routing-resilience-polyline6-one-failover-hard-deadlines).
+- **A hidden retry doubled time-to-502.** The session's one-retry adapter repeated a timed-out call, and `external_api_calls` never showed it. Replaced by one call to a different host and an 8 s cap per call.
+- **`locmem` is per worker.** Under gunicorn, a request landing on a second worker re-routed and reported the wrong `external_api_calls`. Moved to a file cache shared by all workers. [Decision 11](#11-cache-the-route-not-the-response).
+- **The optimal plan looked wrong.** The provably cheapest NYC → LA plan made 16–17 stops to save cents. Optimal for the stated objective, unrealistic for a driver; the objective gained a per-stop price. [Decision 9](#9-optimizer-v2-dynamic-program-with-a-per-stop-price).
+- **Public Valhalla caps trucks at 1,500 km.** Every coast-to-coast truck route is rejected with error 154, so `truck` became opt-in instead of the default. [Decision 14](#14-truck-routing-valhalla-opt-in-car-stays-the-default).
+- **Geoapify's structured batch stalled.** A 40-address test sat `pending` for 40+ minutes; the free-text batch endpoint at the same 0.5 credit/address finished the 5,000-address run in minutes.
+- **Centroid error is absorbed by the corridor.** Moving 741 stations a median 1.7 mi changed no plan on the three reference routes, which turned a planned accuracy fix into evidence for the original design. [Decision 18](#18-geocode-addresses-once-with-geoapify-and-keep-the-centroid).
+- **Published numbers drift.** Re-geocoding added one NYC → LA corridor station (447 → 448), and the pure-cheapest plan became 17 stops at $698.91 instead of the 16 stops at $698.92 recorded in PR #8. These docs carry the re-measured values; the benchmark command exists so numbers are regenerated, not copied.
+
+## Review & quality process
+
+<Tabs items={['AI review', 'Static review', 'Visual QA', 'Tests & CI']}>
+<Tab value="AI review">
+
+Three AI reviewers were requested on every pull request.
+
+| Reviewer | PRs with inline findings | Inline findings |
+| --- | ---: | ---: |
+| Kilo Code | 9 | 45 |
+| CodeRabbit | 5 | 7 |
+| GitHub Copilot | 0 | 0 (quota reached on all 19) |
+
+Findings that changed code include the table-wipe guard and same-name disambiguation (PR #1), `persist-credentials: false` (PR #10), an overridable `SECRET_KEY` (PR #14), the timeout bound and malformed-geometry failover (PR #15), and the Geoapify polling cap, job-id persistence and strict result ordering (PR #18).
+
+<Callout title="Not every PR got an AI review">
+Free tiers were rate-limited. 8 of 19 PRs (#2, #5, #11, #12, #13, #16, #17, #19) received no inline AI review and merged after self-review; the six after #10 also had green CI. PR #12 was itself the fix for an independent review's findings.
+</Callout>
+
+</Tab>
+<Tab value="Static review">
+
+open-code-review, run in no-key delegation mode over the codebase: **0 critical, 0 high, 2 medium, 7 low**. The mediums were map-popup escaping and upstream rate limiting. All nine were addressed in the hardening pass, [PR #12](https://github.com/itsmrad/fuel-route-api/pull/12); the Nominatim cache and 1 request/s throttle shipped just before it in [PR #11](https://github.com/itsmrad/fuel-route-api/pull/11).
+
+</Tab>
+<Tab value="Visual QA">
+
+52 full-page screenshots (13 routes × 1440 and 390 px × dark and light), interaction checks, axe-core in both themes, an internal-link crawl and console capture. **19 findings (2 high, 8 medium, 9 low), all fixed.** After: 0 contrast violations, 0 broken internal links, CLS 0, 0 production console errors. See [PR #16](https://github.com/itsmrad/fuel-route-api/pull/16).
+
+</Tab>
+<Tab value="Tests & CI">
+
+- **39 tests**, no network: optimizer against brute force (300 seeded instances, with and without a stop penalty), polyline6 against Google's reference encoding, every routing failover path, the 8 s deadline, cache keys, every error code, the geocoding filter and the naive-driver baseline.
+- **Postman**: 12 requests, 48 of 48 assertions pass under newman.
+- **CI**: two jobs (api 13 s, docs build + type check 43 s on the latest run); 27 of 27 recorded runs green.
+
+</Tab>
+</Tabs>

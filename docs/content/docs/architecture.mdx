@@ -20,11 +20,11 @@ Internally the steps are three plain functions: `resolve(query) → {lat, lon, e
 
 | Stage | Cost | Notes |
 | --- | --- | --- |
-| OSRM route | ~0.6–1.0 s | Public demo server, coast to coast included. Dominates every cold request. Polyline6 keeps Miami → Seattle at 125 KB; GeoJSON was 818 KB and 2.6–33 s. |
+| OSRM route | ~0.4–0.8 s | Public demo server, coast to coast included. Dominates every cold request: cold p50 421 ms, p95 838 ms over 12 routes ([Benchmarks](/docs/benchmarks)). Polyline6 keeps Miami → Seattle at 125 KB; GeoJSON was 818 KB and 2.6–33 s. |
 | Valhalla truck route | ~0.8–2.3 s | Dallas → Chicago, p50 1.1 s vs 0.6 s for OSRM. Over 1,500 km it is skipped. |
-| `stations_along` | 18–30 ms | Dallas → Chicago keeps 189 corridor stations, NYC → LA 447. |
-| Optimizer | 10–25 ms | O(n·F) DP: n corridor stations × 501 fuel levels. |
-| Cache hit | 15–40 ms | No external calls; the optimizer re-runs. |
+| `stations_along` | 18–30 ms | Dallas → Chicago keeps 187 corridor stations, NYC → LA 448. |
+| Optimizer | 7–19 ms | O(n·F) DP: n corridor stations × 501 fuel levels. p50 6.6 ms, p95 19 ms. |
+| Cache hit | 9.5–23 ms | p50–p95 over 240 requests. No external calls; the optimizer re-runs. |
 
 ## Decisions
 

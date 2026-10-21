@@ -42,7 +42,7 @@ Total: **60 gallons for $178.10**. Nothing is bought at A, and the truck drives 
 
 ## Priced stops: a dynamic program
 
-On real corridors the greedy chases cents. NYC → Los Angeles has 447 corridor stations, and with free stops the cheapest plan makes 16 stops, many of them small top-ups to reach a station two cents cheaper. A stop costs time, so the service gives each one a price, and greedy is no longer optimal: it never weighs "one more stop" against "a few cents per gallon".
+On real corridors the greedy chases cents. NYC → Los Angeles has 448 corridor stations, and with free stops the cheapest plan makes 17 stops, many of them small top-ups to reach a station two cents cheaper. A stop costs time, so the service gives each one a price, and greedy is no longer optimal: it never weighs "one more stop" against "a few cents per gallon".
 
 The service solves it exactly with a dynamic program over **(station, fuel on arrival)**:
 
@@ -51,7 +51,7 @@ The service solves it exactly with a dynamic program over **(station, fuel on ar
 - **Driving** `d` miles to the next station shifts the array: `f` becomes `f − d`; negative fuel is dropped.
 - At the destination any `f ≥ 0` is fine. The cheapest one, followed back through stored back-pointers, gives the stops and how much each one bought.
 
-Complexity is **O(n · F)**: n corridor stations, F = 501 fuel levels. NYC → LA (447 stations) runs in about 22 ms in pure Python.
+Complexity is **O(n · F)**: n corridor stations, F = 501 fuel levels. NYC → LA (448 stations) runs in about 22 ms in pure Python.
 
 Fuel is counted in **whole miles** (0.1 gal). Station positions round up to the next mile, and the tank cap rounds down, so every plan the DP returns can really be driven; the cost of that rounding is at most a fraction of a gallon per stop. The test suite checks the DP against a brute force that tries every purchase at every station, with and without a penalty.
 
@@ -59,13 +59,13 @@ Fuel is counted in **whole miles** (0.1 gal). Station positions round up to the 
 
 | `stop_penalty` | NYC → LA stops | Fuel cost |
 | --- | ---: | ---: |
-| 0 | 16 | $698.92 |
-| 5–10 | 9 | $700.05 |
+| 0 | 17 | $698.91 |
+| 5–10 | 9 | $700.04 |
 | **15 (default)** | **7** | **$702.79** |
 | 20–30 | 7 | $702.79 |
 | 40 | 6 | $705.93 |
 
-$15 removes nine stops for $3.87 more fuel. Dallas → Chicago drops from 4 stops to 2 (+$0.14), Miami → Seattle from 20 to 8 (+$3.46). The penalty only steers the choice: `total_fuel_cost` is still fuel money only. Pass `stop_penalty=0` for the cheapest-fuel plan.
+$15 removes ten stops for $3.88 more fuel. Dallas → Chicago drops from 4 stops to 2 (+$0.14), Miami → Seattle from 20 to 8 (+$3.46). The penalty only steers the choice: `total_fuel_cost` is still fuel money only. Pass `stop_penalty=0` for the cheapest-fuel plan.
 
 ## Implementation notes
 
