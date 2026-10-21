@@ -17,7 +17,7 @@ Live docs and demo: (deployment URL — added in deploy step)
 | Total money spent at 10 MPG | `total_fuel_cost` (fuel bought on the way) and `cost_of_fuel_consumed` (all fuel used). Money math in `Decimal`. | `optimizer.py` |
 | Use the provided price file | Deduplicated and geocoded once by `manage.py load_stations`. | `api/data/fuel-prices.csv` |
 | Free routing API, few calls | OSRM public server, one call returns geometry, distance and duration. `vehicle=truck` uses Valhalla truck costing (opt-in, see Limits). | `geo.get_route` |
-| Fast | Cold ~0.9 s (almost all OSRM), cached 15–40 ms. | see Performance |
+| Fast | Cold p50 421 ms (almost all OSRM), cached p50 9.5 ms. | see Performance |
 | Latest Django | Django 6.1, plain `JsonResponse`, no DRF. | `api/pyproject.toml` |
 
 ## Quickstart
@@ -98,12 +98,13 @@ Nine fewer stops for +$3.87. The penalty only steers the choice; it is never add
 
 ## Performance
 
-| Stage | Time |
-| --- | --- |
-| Cold request | ~0.8–0.9 s (Dallas → Chicago, NYC → LA, Miami → Seattle), dominated by the OSRM call |
-| Cached route (optimizer re-runs) | 15–40 ms |
-| Corridor match | 18–30 ms |
-| DP (NYC → LA, 447 stations) | ~22 ms |
+12 US routes (196 to 3,304 mi), gunicorn `-w 2 --threads 4 -k gthread`, from a dev laptop against public OSRM (`manage.py benchmark`):
+
+| Cold (1 OSRM call) p50 / p95 | Cached p50 / p95 | `stop_penalty` change p50 / p95 | Cached compute (DP p50) |
+| --- | --- | --- | --- |
+| 421 / 838 ms | 9.5 / 23 ms | 9.4 / 23 ms, 0 calls | 9.1 ms (6.6 ms) |
+
+Against a naive fill-when-low driver, the optimizer spends 12.3% less on fuel ($2,718.99 vs $3,101.76, 31 vs 29 stops). Details: [docs/content/docs/benchmarks.mdx](docs/content/docs/benchmarks.mdx).
 
 ## Data and geocoding
 
@@ -116,7 +117,7 @@ The CSV has no coordinates and addresses like `I-44, EXIT 283 & US-69`. `load_st
 ## Tests
 
 ```bash
-cd api && uv run python manage.py test   # 38 tests, no network (OSRM/Valhalla mocked)
+cd api && uv run python manage.py test   # 39 tests, no network (OSRM/Valhalla mocked)
 ```
 
 Optimizer cases (cheap-ahead, fill-up, short trip, unreachable gap, exact cents, DP vs brute force), geocoding, and the endpoint (asserts 1 external call, then 0 on repeat).
@@ -130,7 +131,7 @@ api/                     Django project (uv)
     geo.py               resolve location, OSRM client, stations along route
     optimizer.py         plan_fuel_stops() DP
     views.py             /api/route/, /api/route/map/, /api/openapi.yaml
-    management/commands/load_stations.py, geocode_stations.py
+    management/commands/load_stations.py, geocode_stations.py, benchmark.py
     templates/routing/map.html
     test_*.py
   data/fuel-prices.csv, station_coords.csv
