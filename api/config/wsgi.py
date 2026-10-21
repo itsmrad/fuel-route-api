@@ -14,3 +14,8 @@ from django.core.wsgi import get_wsgi_application
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
 application = get_wsgi_application()
+
+# Warm up only in real servers (gunicorn, runserver): not for migrate, tests or load_stations.
+from routing import geo  # noqa: E402
+
+geo.places(), geo.grid()
