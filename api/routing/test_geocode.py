@@ -14,12 +14,16 @@ DALLAS = (32.79, -96.77)
 
 class AcceptTests(SimpleTestCase):
     def test_guard(self):
-        hit = {'result_type': 'street', 'rank': {'confidence': 0.9}, 'lat': 32.70, 'lon': -96.70}  # ~7 mi off
-        self.assertEqual(accept(hit, DALLAS), (32.70, -96.70, 0.9))
-        self.assertIsNone(accept({**hit, 'lat': 33.3}, DALLAS))  # ~35 mi off: a same-named place elsewhere
-        self.assertIsNone(accept({**hit, 'result_type': 'city'}, DALLAS))  # no better than the centroid
-        self.assertIsNone(accept({**hit, 'rank': {'confidence': 0.2}}, DALLAS))
-        self.assertIsNone(accept(None, DALLAS))
+        hit = {'result_type': 'street', 'rank': {'confidence': 0.9}, 'lat': 32.70, 'lon': -96.70,  # ~7 mi off
+               'address_line1': 'Interstate 20'}
+        self.assertEqual(accept(hit, DALLAS, 'I-20, EXIT 472'), (32.70, -96.70, 0.9))
+        self.assertIsNone(accept({**hit, 'lat': 33.3}, DALLAS, 'I-20'))  # ~35 mi off: a same-named place elsewhere
+        self.assertIsNone(accept({**hit, 'result_type': 'city'}, DALLAS, 'I-20'))  # no better than the centroid
+        self.assertIsNone(accept({**hit, 'rank': {'confidence': 0.2}}, DALLAS, 'I-20'))
+        self.assertIsNone(accept({**hit, 'address_line1': 'Trail Exit'}, DALLAS, 'I-20, EXIT 472'))  # wrong road
+        self.assertIsNotNone(accept({**hit, 'address_line1': 'Interchange 472'}, DALLAS, 'I-20, EXIT 472'))
+        self.assertIsNone(accept({**hit, 'result_type': 'building', 'address_line1': '159 Van Horn Dr'}, DALLAS, 'I-10, EXIT 160'))
+        self.assertIsNone(accept(None, DALLAS, 'I-20'))
 
 
 @patch('routing.management.commands.load_stations.build_index', return_value={('TX', 'dallas'): DALLAS})
