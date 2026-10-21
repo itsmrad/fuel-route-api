@@ -16,7 +16,7 @@ Three choices carry the design:
 
 - **One routing call.** OSRM returns the full route geometry in a single request. Locations written as `City, ST` or `lat,lon` resolve against a local Census table, so they cost nothing.
 - **Offline geocoding.** The price CSV has no coordinates. Stations are placed at their city's Census centroid, computed once by `load_stations`.
-- **An exact optimizer that counts stops.** A dynamic program over (station, fuel) minimises fuel cost plus $15 per stop, so NYC → LA takes 7 stops instead of 16 for $4 more fuel. It runs in about 20 ms. See [How the optimizer works](/docs/optimizer).
+- **An exact optimizer that counts stops.** A dynamic program over (station, fuel) minimises fuel cost plus $15 per stop, so NYC → LA takes 7 stops instead of 17 for $3.88 more fuel. It runs in about 20 ms. See [How the optimizer works](/docs/optimizer).
 
 ## The response at a glance
 
