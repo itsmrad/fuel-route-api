@@ -22,19 +22,21 @@ Three choices carry the design:
 
 ```json title="GET /api/route/?start=Dallas, TX&finish=Chicago, IL"
 {
-  "start":  { "query": "Dallas, TX", "lat": 32.78, "lon": -96.8 },
-  "finish": { "query": "Chicago, IL", "lat": 41.88, "lon": -87.63 },
-  "distance_miles": 925.4,
-  "duration_hours": 13.6,
+  "start":  { "query": "Dallas, TX", "lat": 32.7933, "lon": -96.7665 },
+  "finish": { "query": "Chicago, IL", "lat": 41.837, "lon": -87.6849 },
+  "distance_miles": 961.0,
+  "duration_hours": 17.0,
   "fuel_stops": [
-    { "mile": 412.3, "name": "PILOT #123", "address": "I-44, EXIT 283", "city": "Big Cabin",
-      "state": "OK", "lat": 36.53, "lon": -95.22, "price": 3.007, "gallons": 31.2, "cost": 93.82 }
+    { "mile": 161.6, "name": "EXTRA MILE TRUCK STOP", "address": "I-30 EXIT 208", "city": "Hooks",
+      "state": "TX", "lat": 33.4707, "lon": -94.2865, "price": 2.817, "gallons": 16.1, "cost": 45.36 },
+    { "mile": 648.0, "name": "HUCKS FOOD & FUEL #379", "address": "I-57, EXIT 53", "city": "Marion",
+      "state": "IL", "lat": 37.7344, "lon": -88.9412, "price": 2.929, "gallons": 30.1, "cost": 88.16 }
   ],
-  "total_gallons_purchased": 42.5,
-  "total_fuel_cost": 130.53,
-  "cost_of_fuel_consumed": 284.22,
+  "total_gallons_purchased": 46.2,
+  "total_fuel_cost": 133.52,
+  "cost_of_fuel_consumed": 277.74,
   "stop_penalty": 15.0,
-  "route": { "type": "LineString", "coordinates": [[-96.8, 32.78], "…"] },
+  "route": { "type": "LineString", "coordinates": [[-96.76642, 32.79325], "…"] },
   "map_url": "https://<host>/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0",
   "external_api_calls": 1
 }
