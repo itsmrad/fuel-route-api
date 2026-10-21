@@ -64,7 +64,7 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-The `.env` file sets `DEBUG=False`, `SECRET_KEY` and `ALLOWED_HOSTS`. Nothing secret lives in the repo.
+The `.env` file sets `SECRET_KEY` and `ALLOWED_HOSTS`. `DEBUG` is off unless set; `manage.py` turns it on for local `runserver`/`test`, gunicorn never does. Nothing secret lives in the repo.
 
 ## Deploying a change
 
@@ -75,7 +75,6 @@ cd /srv/fuel-route-api && git pull --ff-only
 cd api
 uv sync --frozen
 uv run python manage.py migrate --noinput
-uv run python manage.py collectstatic --noinput
 
 cd ../docs
 npm ci && npm run build
