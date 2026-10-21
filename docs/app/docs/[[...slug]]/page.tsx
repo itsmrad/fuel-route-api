@@ -29,7 +29,8 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
       {page.slugs.length > 0 && (
         <>
           <DocsTitle>{page.data.title}</DocsTitle>
-          <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
+          {/* API pages render their full description in the body; the frontmatter copy is for meta tags */}
+          {!page.data._openapi && <DocsDescription className="mb-0">{page.data.description}</DocsDescription>}
           <div className="flex flex-row gap-2 items-center border-b pb-6">
             <MarkdownCopyButton markdownUrl={markdownUrl} />
             <ViewOptionsPopover
