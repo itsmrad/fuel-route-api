@@ -1,0 +1,320 @@
+openapi: 3.1.0
+info:
+  title: Fuel Route API
+  version: 1.0.0
+  summary: Cost-optimal fuel stops along a driving route in the USA.
+  description: |
+    Give a start and a finish location in the USA. The API returns the driving route,
+    the fuel stops that minimise cost for a truck with a 500-mile range at 10 MPG,
+    and the total fuel cost. Responses are cached per normalized start/finish pair.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: /
+    description: Same origin (the docs site proxies /api/* to Django)
+tags:
+  - name: Route
+    description: Plan a route and render it on a map.
+paths:
+  /api/route/:
+    get:
+      operationId: planRoute
+      tags: [Route]
+      summary: Plan a route with fuel stops
+      description: |
+        Resolves both locations, fetches one driving route from OSRM, finds stations within
+        10 miles of the route, and runs the greedy fill-or-not-to-fill optimizer.
+        The vehicle starts with a full tank (500 miles).
+      parameters:
+        - $ref: '#/components/parameters/Start'
+        - $ref: '#/components/parameters/Finish'
+      responses:
+        '200':
+          description: Route planned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutePlan'
+              examples:
+                dallasToChicago:
+                  summary: Dallas, TX to Chicago, IL (2 stops)
+                  value:
+                    start: { query: 'Dallas, TX', lat: 32.7767, lon: -96.797 }
+                    finish: { query: 'Chicago, IL', lat: 41.8781, lon: -87.6298 }
+                    distance_miles: 925.4
+                    duration_hours: 13.6
+                    fuel_stops:
+                      - mile: 412.3
+                        name: 'PILOT TRAVEL CENTER #123'
+                        address: I-44, EXIT 283 & US-69
+                        city: Big Cabin
+                        state: OK
+                        lat: 36.5384
+                        lon: -95.2228
+                        price: 3.007
+                        gallons: 31.2
+                        cost: 93.82
+                      - mile: 742.8
+                        name: 'LOVES TRAVEL STOP #412'
+                        address: I-55, EXIT 52
+                        city: Litchfield
+                        state: IL
+                        lat: 39.1753
+                        lon: -89.6543
+                        price: 3.249
+                        gallons: 11.3
+                        cost: 36.71
+                    total_gallons_purchased: 42.5
+                    total_fuel_cost: 130.53
+                    cost_of_fuel_consumed: 284.22
+                    route:
+                      type: LineString
+                      coordinates:
+                        - [-96.797, 32.7767]
+                        - [-95.2228, 36.5384]
+                        - [-89.6543, 39.1753]
+                        - [-87.6298, 41.8781]
+                    map_url: https://fuel-route.example.com/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL
+                    external_api_calls: 1
+                austinToDallas:
+                  summary: Austin, TX to Dallas, TX (short trip, 0 stops)
+                  value:
+                    start: { query: 'Austin, TX', lat: 30.2672, lon: -97.7431 }
+                    finish: { query: 'Dallas, TX', lat: 32.7767, lon: -96.797 }
+                    distance_miles: 195.3
+                    duration_hours: 3.0
+                    fuel_stops: []
+                    total_gallons_purchased: 0
+                    total_fuel_cost: 0
+                    cost_of_fuel_consumed: 61.52
+                    route:
+                      type: LineString
+                      coordinates:
+                        - [-97.7431, 30.2672]
+                        - [-97.1467, 31.5493]
+                        - [-96.797, 32.7767]
+                    map_url: https://fuel-route.example.com/api/route/map/?start=Austin%2C+TX&finish=Dallas%2C+TX
+                    external_api_calls: 0
+        '400':
+          description: Missing input, or a location that is unknown or outside the USA.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing:
+                  summary: Missing parameter
+                  value: { error: missing_parameter, detail: 'Both "start" and "finish" are required.' }
+                unknown:
+                  summary: Unknown location
+                  value: { error: unknown_location, detail: 'Could not resolve "Springfeld, ZZ" to a US location.' }
+        '422':
+          description: No station within range for some stretch of the route (gap above 500 miles).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: unreachable
+                detail: No fuel station between mile 1204.6 and mile 1731.9 (527.3 mi gap, range is 500 mi).
+        '502':
+          description: The routing or geocoding provider failed or timed out.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: routing_provider_error
+                detail: OSRM did not respond within 10 s.
+  /api/route/map/:
+    get:
+      operationId: routeMap
+      tags: [Route]
+      summary: Render the route on a map
+      description: |
+        HTML page (Leaflet + OpenStreetMap tiles) with the route line and numbered fuel stops.
+        Reads the cached plan for the same start/finish, so it adds no external calls after
+        `/api/route/`.
+      parameters:
+        - $ref: '#/components/parameters/Start'
+        - $ref: '#/components/parameters/Finish'
+      responses:
+        '200':
+          description: Map page.
+          content:
+            text/html:
+              schema:
+                type: string
+              example: '<!doctype html><html><head><title>Dallas, TX to Chicago, IL</title>...'
+        '400':
+          description: Missing input, or a location that is unknown or outside the USA.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Route has a gap longer than the 500-mile range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The routing or geocoding provider failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  parameters:
+    Start:
+      name: start
+      in: query
+      required: true
+      description: '"City, ST" or "lat,lon". Anything else falls back to Nominatim (+1 external call).'
+      schema:
+        type: string
+      example: Dallas, TX
+    Finish:
+      name: finish
+      in: query
+      required: true
+      description: '"City, ST" or "lat,lon". Anything else falls back to Nominatim (+1 external call).'
+      schema:
+        type: string
+      example: Chicago, IL
+  schemas:
+    Location:
+      type: object
+      required: [query, lat, lon]
+      properties:
+        query:
+          type: string
+          description: The input as given.
+          examples: ['Dallas, TX']
+        lat:
+          type: number
+          examples: [32.7767]
+        lon:
+          type: number
+          examples: [-96.797]
+    FuelStop:
+      type: object
+      required: [mile, name, address, city, state, lat, lon, price, gallons, cost]
+      properties:
+        mile:
+          type: number
+          description: Distance from the start along the route, in miles.
+          examples: [412.3]
+        name:
+          type: string
+          examples: ['PILOT TRAVEL CENTER #123']
+        address:
+          type: string
+          examples: ['I-44, EXIT 283 & US-69']
+        city:
+          type: string
+          examples: [Big Cabin]
+        state:
+          type: string
+          description: Two-letter state code.
+          examples: [OK]
+        lat:
+          type: number
+          description: City centroid (stations are geocoded to their city).
+          examples: [36.5384]
+        lon:
+          type: number
+          examples: [-95.2228]
+        price:
+          type: number
+          description: USD per gallon.
+          examples: [3.007]
+        gallons:
+          type: number
+          description: Gallons bought at this stop.
+          examples: [31.2]
+        cost:
+          type: number
+          description: USD spent at this stop (price × gallons).
+          examples: [93.82]
+    LineString:
+      type: object
+      description: GeoJSON LineString, coordinates in [lon, lat] order.
+      required: [type, coordinates]
+      properties:
+        type:
+          type: string
+          const: LineString
+        coordinates:
+          type: array
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+    RoutePlan:
+      type: object
+      required:
+        - start
+        - finish
+        - distance_miles
+        - duration_hours
+        - fuel_stops
+        - total_gallons_purchased
+        - total_fuel_cost
+        - cost_of_fuel_consumed
+        - route
+        - map_url
+        - external_api_calls
+      properties:
+        start:
+          $ref: '#/components/schemas/Location'
+        finish:
+          $ref: '#/components/schemas/Location'
+        distance_miles:
+          type: number
+          examples: [925.4]
+        duration_hours:
+          type: number
+          examples: [13.6]
+        fuel_stops:
+          type: array
+          description: Ordered by mile. Empty when the trip fits in one tank.
+          items:
+            $ref: '#/components/schemas/FuelStop'
+        total_gallons_purchased:
+          type: number
+          examples: [42.5]
+        total_fuel_cost:
+          type: number
+          description: USD spent at fuel stops. The trip starts with a full tank.
+          examples: [130.53]
+        cost_of_fuel_consumed:
+          type: number
+          description: Gallons burned over the whole trip × average price paid (or the corridor average when no stop is needed).
+          examples: [284.22]
+        route:
+          $ref: '#/components/schemas/LineString'
+        map_url:
+          type: string
+          format: uri
+          description: Link to the HTML map for the same trip.
+        external_api_calls:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: Calls made to OSRM/Nominatim for this request. 0 on a cache hit.
+          examples: [1]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code.
+          examples: [unknown_location]
+        detail:
+          type: string
+          description: Human-readable explanation.
