@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 import re
 import unicodedata
 import urllib.request
@@ -7,7 +8,7 @@ import zipfile
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from routing.models import Station
@@ -57,14 +58,19 @@ def gazetteer(kind):
 
 
 def build_index():
-    rows = [r for kind in ('place', 'cousubs') for r in gazetteer(kind)]
-    index = {}
-    for st, name, lat, lon in rows:  # exact names first: places win over cousubs
-        index.setdefault((st, normalize(name)), (lat, lon))
-    for st, name, lat, lon in rows:
-        for a in aliases(name):
-            index.setdefault((st, a), (lat, lon))
-    return index
+    """(state, key) -> (lat, lon). Exact beats alias, place beats cousub, incorporated beats CDP.
+    Distinct locations tied on all three are dropped as ambiguous rather than guessed."""
+    rows = [(0, name.endswith(' CDP'), st, name, lat, lon) for st, name, lat, lon in gazetteer('place')]
+    rows += [(1, False, st, name, lat, lon) for st, name, lat, lon in gazetteer('cousubs')]
+    best = {}
+    for tier, cdp, st, name, lat, lon in rows:
+        for alias, key in [(False, normalize(name))] + [(True, a) for a in aliases(name)]:
+            rank, k = (alias, tier, cdp), (st, key)
+            if k not in best or rank < best[k][0]:
+                best[k] = (rank, (lat, lon))
+            elif rank == best[k][0] and best[k][1] and math.dist(best[k][1], (lat, lon)) > 0.2:  # ~14 mi
+                best[k] = (rank, None)
+    return {k: ll for k, (_, ll) in best.items() if ll}
 
 
 class Command(BaseCommand):
@@ -86,8 +92,8 @@ class Command(BaseCommand):
         stations, unmatched = [], []
         for sid, (price, r) in best.items():
             city, state = r['City'].strip(), r['State'].strip()
-            # unstripped first so 'Junction City' never falls to a place named 'Junction'
-            ll = index.get((state, normalize(city, False))) or index.get((state, normalize(city)))
+            # unstripped, so 'Junction City' never falls to a place named 'Junction'
+            ll = index.get((state, normalize(city, False)))
             if ll is None:
                 unmatched.append(f'{city}, {state}')
                 continue
@@ -96,6 +102,8 @@ class Command(BaseCommand):
                 city=city, state=state, price=price, lat=ll[0], lon=ll[1],
             ))
 
+        if not stations:
+            raise CommandError('No stations matched; refusing to wipe the Station table.')
         with transaction.atomic():
             Station.objects.all().delete()
             Station.objects.bulk_create(stations)
