@@ -7,14 +7,13 @@ from django.core.cache import cache
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.defaults import page_not_found
 
 from routing import geo
 from routing.optimizer import STOP_PENALTY, Unreachable, plan_fuel_stops
 
 RANGE_MILES = 500
-MAX_ROUTE_POINTS = 5000  # ~150 KB of coordinates for NYC->LA
+MAX_ROUTE_POINTS = 5000  # ~104 KB response for NYC->LA
 
 
 def leg(start, finish):
@@ -71,8 +70,7 @@ def error(status, code, detail):
 
 
 def api_get(view):
-    """GET only, JSON 405 otherwise. csrf_exempt so a POST gets that 405, not CSRF's HTML 403."""
-    @csrf_exempt
+    """GET only, JSON 405 otherwise."""
     @functools.wraps(view)
     def wrapped(request):
         if request.method not in ('GET', 'HEAD'):
@@ -121,8 +119,11 @@ def route_api(request):
 
 @api_get
 def route_map(request):
-    if not request.GET.get('start') and not request.GET.get('finish'):
-        return render(request, 'routing/map.html', {'default_penalty': STOP_PENALTY})  # empty demo form
+    given = [request.GET.get(k, '').strip() for k in ('start', 'finish')]
+    if not all(given):  # empty demo form, or a half-filled one
+        error = 'Both start and finish are required.' if any(given) else None
+        return render(request, 'routing/map.html', {'default_penalty': STOP_PENALTY, 'error': error},
+                      status=400 if error else 200)
     result, err = plan_for(request)
     return err or render(request, 'routing/map.html', {'plan': result, 'default_penalty': STOP_PENALTY})
 
