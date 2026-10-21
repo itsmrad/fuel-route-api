@@ -1,14 +1,20 @@
 import csv
 import functools
+import hashlib
 import io
 import math
 import re
+import threading
+import time
 import unicodedata
 import urllib.request
 import zipfile
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 from routing.models import Station
 
@@ -31,8 +37,18 @@ CITY_ST = re.compile(r'([^,]+?)\s*,\s*([A-Za-z]{2})')
 CELL = 0.5  # grid cell size, degrees
 MI_PER_DEG = 69.09
 
+http = requests.Session()  # keep-alive to OSRM/Nominatim saves a TLS handshake (~330 ms) per call
+http.headers.update(UA)
+http.mount('https://', HTTPAdapter(max_retries=Retry(
+    total=1, backoff_factor=1, status_forcelist=[429, 502, 503, 504], allowed_methods=['GET'])))
+nominatim_lock, nominatim_last = threading.Lock(), 0.0
+
 
 class RoutingError(Exception):
+    pass
+
+
+class NoRoute(Exception):
     pass
 
 
@@ -108,19 +124,33 @@ def resolve(query):
         return {'query': query, 'lat': lat, 'lon': lon, 'label': q, 'external': False}
     if (m := CITY_ST.fullmatch(q)) and (ll := places().get((m[2].upper(), normalize(m[1], False)))):
         return {'query': query, 'lat': ll[0], 'lon': ll[1], 'label': f'{m[1]}, {m[2].upper()}', 'external': False}
-    try:
-        r = requests.get(NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'},
-                         headers=UA, timeout=5)
-        r.raise_for_status()
-        hits = r.json()
-    except requests.RequestException as e:
-        raise RoutingError(f'geocoder unavailable: {e}') from e
+    hits, external = nominatim(q)
     if not hits:
         raise ValueError(f'location not found in the USA: {query!r}')
     lat, lon = float(hits[0]['lat']), float(hits[0]['lon'])
     if not in_usa(lat, lon):
         raise ValueError(f'{query!r} is outside the USA')
-    return {'query': query, 'lat': lat, 'lon': lon, 'label': hits[0]['display_name'], 'external': True}
+    return {'query': query, 'lat': lat, 'lon': lon, 'label': hits[0]['display_name'], 'external': external}
+
+
+def nominatim(q):
+    """(hits, called): cached for 30 days on the normalized query, live calls kept >= 1 s apart."""
+    global nominatim_last
+    key = 'nominatim:' + hashlib.sha1(' '.join(q.lower().split()).encode()).hexdigest()
+    if (hits := cache.get(key)) is not None:
+        return hits, False
+    with nominatim_lock:  # ponytail: per-process throttle, N workers can make N req/s; shared limiter if that bites
+        time.sleep(max(0.0, nominatim_last + 1 - time.monotonic()))
+        try:
+            r = http.get(NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'}, timeout=5)
+            r.raise_for_status()
+            hits = [{k: h[k] for k in ('lat', 'lon', 'display_name')} for h in r.json()[:1]]
+        except requests.RequestException as e:
+            raise RoutingError(f'geocoder unavailable: {e}') from e
+        finally:
+            nominatim_last = time.monotonic()
+    cache.set(key, hits, 30 * 24 * 3600)
+    return hits, True
 
 
 def get_route(start, finish):
@@ -128,9 +158,11 @@ def get_route(start, finish):
     # ponytail: public OSRM demo server, best-effort and 1 req/s; self-host OSRM or swap to OpenRouteService here
     url = f"{OSRM}{start['lon']},{start['lat']};{finish['lon']},{finish['lat']}"
     try:
-        data = requests.get(url, params={'overview': 'full', 'geometries': 'geojson'}, headers=UA, timeout=10).json()
+        data = http.get(url, params={'overview': 'full', 'geometries': 'geojson'}, timeout=10).json()
     except requests.RequestException as e:
         raise RoutingError(f'routing provider unavailable: {e}') from e
+    if data.get('code') == 'NoRoute':
+        raise NoRoute(data.get('message') or 'no route')
     if data.get('code') != 'Ok' or not data.get('routes'):
         raise RoutingError(data.get('message') or f"no route ({data.get('code')})")
     route = data['routes'][0]

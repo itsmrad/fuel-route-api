@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 from django.core.cache import cache
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 
 from routing import geo
 from routing.models import Station
@@ -12,6 +12,7 @@ COORDS = [[-96.8 + i * 0.054, 32.78] for i in range(201)]  # ~630 mi due east of
 OSRM_OK = {'code': 'Ok', 'routes': [{'geometry': {'coordinates': COORDS}, 'distance': 630 * 1609.344, 'duration': 9 * 3600}]}
 PLACES = {('TX', 'dallas'): (32.78, -96.8), ('MS', 'east'): (32.78, -86.0)}
 URL = '/api/route/?start=Dallas, TX&finish=East, MS'
+LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 
 
 def fake_get(osrm):
@@ -24,6 +25,8 @@ def fake_get(osrm):
     return get
 
 
+@override_settings(CACHES=LOCMEM)
+@patch('routing.geo.time.sleep')  # Nominatim throttle
 @patch('routing.geo.places', return_value=PLACES)
 class RouteApiTests(TestCase):
     def setUp(self):
@@ -37,10 +40,10 @@ class RouteApiTests(TestCase):
         geo.grid.cache_clear()
 
     def get(self, url=URL, osrm=OSRM_OK):
-        with patch('routing.geo.requests.get', side_effect=fake_get(osrm)) as get:
+        with patch('routing.geo.http.get', side_effect=fake_get(osrm)) as get:
             return self.client.get(url), get
 
-    def test_happy_path_then_cache_hit(self, _):
+    def test_happy_path_then_cache_hit(self, *_):
         r, get = self.get()
         self.assertEqual(r.status_code, 200)
         self.assertEqual(get.call_count, 1)  # one OSRM call, both cities resolved locally
@@ -58,55 +61,67 @@ class RouteApiTests(TestCase):
         self.assertEqual(body['route']['coordinates'][-1], COORDS[-1])
         self.assertEqual(body['map_url'], 'http://testserver/api/route/map/?start=Dallas%2C+TX&finish=East%2C+MS&stop_penalty=15.0')
 
-        r, get = self.get('/api/route/?start=dallas,  tx&finish=EAST, MS')
+        r, get = self.get('/api/route/?start= dallas , tx &finish=EAST,MS')
         self.assertEqual(get.call_count, 0)
         self.assertEqual(r.json()['external_api_calls'], 0)
+        self.assertEqual(r.json()['start']['query'], 'dallas , tx')
         self.assertEqual(r.json()['fuel_stops'], body['fuel_stops'])
 
-    def test_missing_param(self, _):
+    def test_missing_param(self, *_):
         r, _ = self.get('/api/route/?start=Dallas, TX')
         self.assertEqual((r.status_code, r.json()['error']), (400, 'missing_parameter'))
 
-    def test_stop_penalty(self, _):
+    def test_stop_penalty(self, *_):
         r, _ = self.get()
         self.assertEqual((r.json()['stop_penalty'], len(r.json()['fuel_stops'])), (15.0, 2))
         r, get = self.get(URL + '&stop_penalty=0')
-        self.assertEqual(get.call_count, 1)  # own cache entry
+        self.assertEqual((get.call_count, r.json()['external_api_calls']), (0, 0))  # route cached, optimizer re-run
         self.assertEqual(r.json()['stop_penalty'], 0.0)
         r, get = self.get(URL + '&stop_penalty=1000')  # one pricier stop beats two
+        self.assertEqual(get.call_count, 0)
         self.assertEqual([s['name'] for s in r.json()['fuel_stops']], ['S1'])
         for bad in ('-1', 'abc', 'nan', 'inf'):
             r, _ = self.get(f'{URL}&stop_penalty={bad}')
             self.assertEqual((r.status_code, r.json()['error']), (400, 'invalid_parameter'), bad)
 
-    def test_unknown_location(self, _):
+    def test_unknown_location(self, *_):
         r, _ = self.get('/api/route/?start=Dallas, TX&finish=Nowhere, ZZ')
         self.assertEqual((r.status_code, r.json()['error']), (400, 'unknown_location'))
 
-    def test_unreachable(self, _):
+    def test_unreachable(self, *_):
         Station.objects.all().delete()
         r, _ = self.get()
         self.assertEqual((r.status_code, r.json()['error']), (422, 'unreachable'))
         self.assertIn('between mile 0.0 and mile 630.0', r.json()['detail'])
 
-    def test_routing_down(self, _):
+    def test_no_route(self, *_):
+        r, _ = self.get(osrm={'code': 'NoRoute', 'message': 'Impossible route between points'})
+        self.assertEqual((r.status_code, r.json()['error']), (422, 'no_route'))
+
+    def test_same_start_and_finish(self, *_):
+        r, get = self.get('/api/route/?start=Dallas, TX&finish=32.78,-96.8')
+        body = r.json()
+        self.assertEqual((r.status_code, get.call_count, body['external_api_calls']), (200, 0, 0))
+        self.assertEqual((body['distance_miles'], body['fuel_stops'], body['total_fuel_cost']), (0.0, [], 0.0))
+
+    def test_routing_down(self, *_):
         r, _ = self.get(osrm=requests.ConnectionError('boom'))
         self.assertEqual((r.status_code, r.json()['error']), (502, 'routing_provider_error'))
 
-    def test_get_only(self, _):
+    def test_get_only(self, *_):
         r = Client(enforce_csrf_checks=True).post(URL)
         self.assertEqual((r.status_code, r.json()['error']), (405, 'method_not_allowed'))
 
-    def test_api_404_is_json(self, _):
+    def test_api_404_is_json(self, *_):
         r = self.client.get('/api/nope/')
         self.assertEqual((r.status_code, r.json()['error']), (404, 'not_found'))
 
-    def test_openapi_served(self, _):
+    def test_openapi_served(self, *_):
         r = self.client.get('/api/openapi.yaml')
         self.assertEqual(r.status_code, 200)
         self.assertTrue(b''.join(r.streaming_content).startswith(b'openapi:'))
 
-    def test_map_page(self, _):
+    def test_map_page(self, *_):
         r, get = self.get(URL.replace('/route/', '/route/map/'))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'leaflet')
