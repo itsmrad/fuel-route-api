@@ -1,0 +1,45 @@
+---
+title: How the optimizer works
+description: Greedy "fill or not to fill", why it is optimal, and a worked example.
+icon: Fuel
+---
+
+Stations are sorted by mile marker along the route. The destination is a virtual station with price `0`. Fuel is tracked in miles of range: a 500-mile tank at 10 MPG holds 50 gallons.
+
+## The rule
+
+Standing at a station with price `p` and some fuel left, look at every station within the next 500 miles:
+
+- **A cheaper station is in range.** Buy just enough to reach the *first* one, then drive there. If the fuel in the tank already reaches it, buy nothing.
+- **Nothing cheaper is in range.** Fill the tank here, then drive to the *cheapest* station in range.
+- **No station is in range** and the destination is further than 500 miles: return `422 unreachable`, naming the gap.
+
+## Why greedy is optimal
+
+Every mile of the trip needs fuel bought somewhere before it. The cheapest station that can still reach a given mile is the best place to buy the fuel for it. The rule does exactly that:
+
+- If something cheaper lies ahead within range, fuel bought here beyond what it takes to get there could have been bought cheaper later. So it buys the minimum.
+- If nothing cheaper lies within range, every mile of the next 500 will be fuelled at this price or worse. So it buys as much as the tank holds, and moves to the best place to top up next.
+
+An exchange argument makes it formal: take any optimal plan that disagrees with greedy at the first station where they differ, move gallons from the more expensive station to the cheaper one, and the cost never increases. This is the classic gas-station problem (Khuller, Malekian, Mestre, 2007) on a line, where the greedy solution is exact.
+
+## Worked example
+
+A 1,100-mile trip with six stations. Step through it, or shuffle the prices and watch the plan change.
+
+<OptimizerViz />
+
+| At | Fuel on arrival | In range (next 500 mi) | Decision | Bought |
+| --- | --- | --- | --- | --- |
+| Start | 500 mi | A, B, C | Can't buy here. Drive to A. | — |
+| A · $3.40 | 380 mi | B $3.05 is cheaper | B is reachable already. Buy nothing. | — |
+| B · $3.05 | 200 mi | D $2.95 is cheaper | Need 310 mi, have 200. Buy 11 gal. | $33.55 |
+| D · $2.95 | 0 mi | Finish (price 0) | Need 490 mi. Buy 49 gal. | $144.55 |
+
+Total: **60 gallons for $178.10**. Nothing is bought at A, and the truck drives straight past C: B bought exactly enough to reach the cheaper D.
+
+## Implementation notes
+
+- Complexity is O(n·k): n corridor stations (189 for Dallas → Chicago), k stations per 500-mile window. It runs in well under a millisecond.
+- `Station.price` is a `DecimalField`. Miles and gallons convert with `Decimal(str(x))`, so `Decimal × float` never happens and costs are exact to the cent.
+- Positions are city centroids, so a mile marker can be off by a few miles. See [Limits](/docs/limits).

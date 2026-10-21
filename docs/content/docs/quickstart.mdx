@@ -1,0 +1,55 @@
+---
+title: Quickstart
+description: Run the API and these docs locally, then make the first request.
+icon: Rocket
+---
+
+You need [uv](https://docs.astral.sh/uv/) and Node 20 or newer. uv installs the pinned Python (3.14, from `.python-version`) on first run.
+
+<Steps>
+<Step>
+
+### Start the API
+
+```bash
+cd api
+uv sync
+uv run python manage.py migrate
+uv run python manage.py load_stations   # downloads the Census Gazetteer once, ~10 s
+uv run python manage.py runserver       # http://127.0.0.1:8000
+```
+
+`load_stations` prints its coverage. Expect `matched: 6443 (97.2%)`.
+
+</Step>
+<Step>
+
+### Start the docs
+
+```bash
+cd docs
+npm install
+npm run dev                             # http://localhost:3000
+```
+
+The docs site proxies `/api/*` to `http://127.0.0.1:8000`. Point it elsewhere with `API_ORIGIN=http://host:port npm run dev`.
+
+</Step>
+<Step>
+
+### Make a request
+
+```bash
+curl -s 'http://127.0.0.1:8000/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL' | jq '{distance_miles, total_fuel_cost, stops: (.fuel_stops | length), external_api_calls}'
+```
+
+```json
+{ "distance_miles": 925.4, "total_fuel_cost": 130.53, "stops": 2, "external_api_calls": 1 }
+```
+
+Send it again: `external_api_calls` drops to `0` and the response comes back in milliseconds.
+
+</Step>
+</Steps>
+
+Or skip the terminal and use the [route planner](/docs/route-planner) or the [API playground](/docs/api/plan-route). Both call the same endpoint through the docs origin.

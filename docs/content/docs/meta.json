@@ -1,0 +1,19 @@
+{
+  "title": "Fuel Route API",
+  "pages": [
+    "---Getting started---",
+    "index",
+    "quickstart",
+    "route-planner",
+    "---Concepts---",
+    "architecture",
+    "optimizer",
+    "data",
+    "---Reference---",
+    "api",
+    "errors",
+    "---Operations---",
+    "deployment",
+    "limits"
+  ]
+}
