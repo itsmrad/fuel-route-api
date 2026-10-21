@@ -6,7 +6,7 @@ Django API that takes a start and finish location in the USA and returns the rou
 
 Monorepo:
 
-- `api/`: Django project (`manage.py`, `config/`, `routing/`, `data/`, `requirements.txt`)
+- `api/`: Django project (`manage.py`, `config/`, `routing/`, `data/`, `pyproject.toml` + `uv.lock`)
 - `docs/`: Fumadocs (Next.js) docs site with an interactive route planner and API reference (coming)
 - `deploy/`: Caddyfile, systemd units, `deploy.sh` (coming)
 
@@ -14,6 +14,7 @@ Monorepo:
 
 ```sh
 cd api
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python manage.py migrate && .venv/bin/python manage.py load_stations
+uv sync
+uv run python manage.py migrate && uv run python manage.py load_stations
+uv run python manage.py runserver
 ```

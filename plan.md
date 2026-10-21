@@ -92,7 +92,7 @@ Errors: `400` (missing input, unknown or non-US location), `422` (unreachable ga
 fuel-route-api/
   api/                        Django project
     manage.py
-    requirements.txt          django, requests, gunicorn
+    pyproject.toml, uv.lock   django, requests, gunicorn (uv)
     openapi.yaml              OpenAPI 3.1 spec (also served at /api/openapi.yaml)
     config/                   settings.py, urls.py, wsgi.py
     routing/
@@ -157,16 +157,16 @@ CodeRabbit auto-review is skipped on this repo, so trigger it by commenting `@co
 ## 7. Deployment (AWS Lightsail)
 
 1. Lightsail instance: Ubuntu 24.04, smallest plan ($5/mo is enough), static IP attached, ports 80/443 open.
-2. On the box, in `api/`: `python3 -m venv`, `pip install -r requirements.txt`, `migrate`, `load_stations`, `collectstatic`. In `docs/`: Node LTS, `npm ci && npm run build`.
-3. systemd units: `gunicorn config.wsgi -w 3 -b 127.0.0.1:8000` (from `api/`) and `next start -p 3000` (from `docs/`).
+2. On the box, in `api/`: install uv, `uv sync`, `uv run python manage.py migrate|load_stations|collectstatic`. In `docs/`: Node LTS, `npm ci && npm run build`.
+3. systemd units: `.venv/bin/gunicorn config.wsgi -w 3 -b 127.0.0.1:8000` (from `api/`) and `next start -p 3000` (from `docs/`).
 4. Caddy reverse proxy with automatic HTTPS and path routing: `/api/*` → `127.0.0.1:8000`, everything else → `127.0.0.1:3000`. With no domain, use `<ip>.sslip.io` for a free valid certificate.
 5. `DEBUG=False`, `SECRET_KEY`, and `ALLOWED_HOSTS` set from an env file; simple per-IP throttle in Caddy to protect the free OSRM quota.
-6. `deploy/deploy.sh`: `git pull && pip install && migrate && npm ci && npm run build && systemctl restart` (both units).
+6. `deploy/deploy.sh`: `git pull && uv sync && uv run python manage.py migrate && npm ci && npm run build && systemctl restart` (both units).
 
 **Needed from you:** either (a) an IAM user's access keys scoped to Lightsail, so I create the instance with the AWS CLI, or (b) an instance you create, plus its SSH key path and IP. Option (b) is safer because I never hold AWS keys. Optionally, a domain name.
 
 ## 8. Testing and performance targets
-- `cd api && python manage.py test`: optimizer cases + endpoint (OSRM mocked, no network).
+- `cd api && uv run python manage.py test`: optimizer cases + endpoint (OSRM mocked, no network).
 - Targets: cold request under 1.5 s (dominated by OSRM), cached request under 50 ms, compute part under 50 ms.
 - Manual cross-country check: NYC→LA (~2,800 mi, 5+ stops), Miami→Seattle, a short trip (Austin→Dallas, 0 stops).
 
