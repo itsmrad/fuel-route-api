@@ -1,0 +1,71 @@
+---
+title: Benchmarks
+description: Latency, server-side compute, and fuel cost against a naive fill-when-low driver on 12 US routes.
+icon: Timer
+---
+
+Measured 2026-10-21 from a dev laptop (Darwin arm64, Python 3.14.7) against the public OSRM demo server; network-dominated. gunicorn `-w 2 --threads 4 -k gthread` (the Docker image's config), `DEBUG=0`, a fresh file cache, one client, sequential requests.
+
+Method: each route is requested once cold (1.5 s apart; 12 external calls in the whole run), then 20 times cached, then once per `stop_penalty` in [0, 15, 40]. Compute stages are timed in-process on the cached routes. Percentiles are nearest-rank. Reproduce with `CACHE_DIR=<server cache> uv run python manage.py benchmark --url <server> --clear --write`.
+
+## Latency
+
+| Phase | Requests | p50 ms | p95 ms | max ms | `external_api_calls` |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Cold (first request) | 12 | 421 | 838 | 838 | 1 call: 12 |
+| Cached (same request) | 240 | 9.5 | 23 | 25 | 0 call: 240 |
+| `stop_penalty` variant | 36 | 9.4 | 23 | 24 | 0 call: 36 |
+
+Response JSON: median 90 KB raw, 26 KB gzip; largest 106 KB raw, 32 KB gzip (Caddy compresses in production).
+
+## Server-side compute
+
+p50 over all cached requests, in-process (no HTTP). `stations_along` runs only on a cache miss; here it is timed on the cached response line (at most 5,000 points), a slight underestimate on long routes.
+
+| Stage | p50 ms | p95 ms |
+| --- | ---: | ---: |
+| Resolve start + finish (Census table) | 0.01 | 0.02 |
+| Route cache read | 0.8 | 1.3 |
+| Corridor match (`stations_along`, cold path only) | 5.4 | 11 |
+| Optimizer (DP, $15 penalty) | 6.6 | 19 |
+| JSON encode (`JsonResponse`) | 1.6 | 2.1 |
+| Cached request total (resolve to JSON) | 9.1 | 24 |
+
+## Per route
+
+| Route | Miles | Corridor stations | Cold ms | Cached p50 ms | JSON KB raw / gzip |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Austin, TX → Dallas, TX | 196 | 58 | 234 | 4.3 | 63 / 17 |
+| Boston, MA → Washington, DC | 439 | 145 | 838 | 9.4 | 88 / 25 |
+| Phoenix, AZ → Salt Lake City, UT | 655 | 66 | 413 | 5.8 | 106 / 29 |
+| Houston, TX → Atlanta, GA | 798 | 138 | 421 | 9.2 | 93 / 27 |
+| Minneapolis, MN → Memphis, TN | 834 | 128 | 421 | 8.0 | 80 / 23 |
+| Jacksonville, FL → Indianapolis, IN | 848 | 158 | 413 | 9.4 | 89 / 26 |
+| Dallas, TX → Chicago, IL | 961 | 187 | 425 | 11 | 106 / 30 |
+| Las Vegas, NV → Kansas City, MO | 1,360 | 107 | 615 | 7.7 | 89 / 26 |
+| Denver, CO → Atlanta, GA | 1,394 | 209 | 655 | 12 | 90 / 27 |
+| Chicago, IL → Houston, TX | 1,083 | 179 | 409 | 11 | 89 / 26 |
+| New York, NY → Los Angeles, CA | 2,810 | 448 | 791 | 23 | 102 / 31 |
+| Miami, FL → Seattle, WA | 3,304 | 382 | 784 | 20 | 102 / 32 |
+
+## Fuel cost against a naive driver
+
+Same corridor stations, same full tank at the start, 500-mile range, 10 MPG. **Naive rule**: at each corridor station in mile order, fill the tank to full if the finish is out of reach and the next station (or the finish) would be reached with under 100 miles of fuel left; otherwise drive on. Fuel left in the tank at the finish is credited back at the last fill price. The optimizer is the service's DP at the default $15 stop penalty and at $0 (pure cheapest); the penalty is never counted as spend.
+
+| Route | Naive $ | Stops | Optimizer ($15) $ | Stops | Cheapest ($0) $ | Stops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Austin, TX → Dallas, TX | 0.00 | 0 | 0.00 | 0 | 0.00 | 0 |
+| Boston, MA → Washington, DC | 0.00 | 0 | 0.00 | 0 | 0.00 | 0 |
+| Phoenix, AZ → Salt Lake City, UT | 62.07 | 1 | 51.28 | 2 | 50.97 | 3 |
+| Houston, TX → Atlanta, GA | 94.34 | 1 | 85.19 | 1 | 84.10 | 3 |
+| Minneapolis, MN → Memphis, TN | 110.25 | 1 | 97.34 | 2 | 97.19 | 5 |
+| Jacksonville, FL → Indianapolis, IN | 108.41 | 1 | 96.94 | 1 | 96.94 | 1 |
+| Dallas, TX → Chicago, IL | 153.40 | 2 | 133.52 | 2 | 133.38 | 4 |
+| Las Vegas, NV → Kansas City, MO | 293.85 | 3 | 270.03 | 3 | 268.23 | 9 |
+| Denver, CO → Atlanta, GA | 295.93 | 3 | 259.95 | 3 | 259.44 | 9 |
+| Chicago, IL → Houston, TX | 189.02 | 2 | 168.94 | 2 | 168.09 | 6 |
+| New York, NY → Los Angeles, CA | 809.26 | 7 | 702.79 | 7 | 698.91 | 17 |
+| Miami, FL → Seattle, WA | 985.23 | 8 | 853.01 | 8 | 849.55 | 20 |
+| **Total** | **3,101.76** | **29** | **2,718.99** | **31** | **2,706.80** | **77** |
+
+Optimizer saves **$382.77 (12.3%)** against the naive driver with 31 stops instead of 29; pure cheapest saves $394.96 (12.7%) but needs 77 stops.
