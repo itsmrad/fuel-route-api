@@ -1,8 +1,9 @@
 ---
 title: Plan a route with fuel stops
-description: Resolves both locations, fetches one driving route from OSRM, finds
-  stations within 10 miles of the route, and picks stops with a dynamic program
-  that minimises fuel cost plus stop_penalty per stop.
+description: Resolves both locations, fetches one driving route (OSRM car, or
+  Valhalla truck with vehicle=truck), finds stations within 10 miles of the
+  route, and picks stops with a dynamic program that minimises fuel cost plus
+  stop_penalty per stop.
 full: true
 _openapi:
   preload:
