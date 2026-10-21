@@ -9,18 +9,18 @@ icon: Workflow
 ## The request path
 
 1. **Resolve** `start` and `finish`. `City, ST` matches the Census table built by `load_stations`; `lat,lon` is parsed directly. Only other inputs fall back to Nominatim, one call each.
-2. **Route** with OSRM `/route/v1/driving` (default, `vehicle=car`), or Valhalla `costing=truck` (`vehicle=truck`): one call, full geometry, distance and duration. If Valhalla fails, or the trip is over its 1,500 km public-server cap, the route comes from OSRM car and `routing.fallback` is `true`.
+2. **Route** with OSRM `/route/v1/driving` (default, `vehicle=car`), or Valhalla `costing=truck` (`vehicle=truck`): one call, full geometry (polyline6), distance and duration. If Valhalla fails, or the trip is over its 1,500 km public-server cap, the route comes from OSRM car. If the OSRM demo server fails or times out, one call goes to the FOSSGIS OSRM server instead. Either way `routing.fallback` is `true`. No retries: each call is cut off after 8 s wall clock, so routing gives up within 16 s (car) or 24 s (truck).
 3. **Find stations along the route.** An in-memory grid index (0.5° cells) narrows the 6,443 stations to the cells the route crosses; a station is kept when it lies within 10 miles of the polyline, and its mile marker is the cumulative distance of the nearest route point.
 4. **Optimize** the stops with the dynamic program described in [How the optimizer works](/docs/optimizer).
 5. **Respond** with JSON. The route (distance, line, corridor stations) is cached on the vehicle and resolved coordinates, so another spelling or `stop_penalty` re-runs only the optimizer. `/api/route/map/` reads the same entry.
 
-Internally the steps are three plain functions: `resolve(query) → {lat, lon, external}`, `get_route(a, b, vehicle) → {coords, distance_miles, duration_hours, routing, calls}`, and `plan_fuel_stops(...)`. `external_api_calls` is `1` for the route (`2` when a truck route fell back to OSRM) plus `1` for each location that needed Nominatim.
+Internally the steps are three plain functions: `resolve(query) → {lat, lon, external}`, `get_route(a, b, vehicle) → {coords, distance_miles, duration_hours, routing, calls}`, and `plan_fuel_stops(...)`. `external_api_calls` is `1` for the route (up to `3` when Valhalla and the first OSRM server failed) plus `1` for each location that needed Nominatim.
 
 ## Where the time goes
 
 | Stage | Cost | Notes |
 | --- | --- | --- |
-| OSRM route | ~0.6–1.7 s | Public demo server. Dominates every cold request. |
+| OSRM route | ~0.6–1.0 s | Public demo server, coast to coast included. Dominates every cold request. Polyline6 keeps Miami → Seattle at 125 KB; GeoJSON was 818 KB and 2.6–33 s. |
 | Valhalla truck route | ~0.8–2.3 s | Dallas → Chicago, p50 1.1 s vs 0.6 s for OSRM. Over 1,500 km it is skipped. |
 | `stations_along` | 18–30 ms | Dallas → Chicago keeps 189 corridor stations, NYC → LA 447. |
 | Optimizer | 10–25 ms | O(n·F) DP: n corridor stations × 501 fuel levels. |

@@ -8,8 +8,23 @@ from django.test import Client, TestCase, override_settings
 from routing import geo
 from routing.models import Station
 
-COORDS = [[-96.8 + i * 0.054, 32.78] for i in range(201)]  # ~630 mi due east of Dallas
-OSRM_OK = {'code': 'Ok', 'routes': [{'geometry': {'coordinates': COORDS}, 'distance': 630 * 1609.344, 'duration': 9 * 3600}]}
+COORDS = [[round(-96.8 + i * 0.054, 6), 32.78] for i in range(201)]  # ~630 mi due east of Dallas
+
+
+def polyline6(coords):
+    out, prev = [], [0, 0]
+    for lon, lat in coords:
+        for k, v in enumerate((round(lat * 1e6), round(lon * 1e6))):
+            d, prev[k] = v - prev[k], v
+            d = ~(d << 1) if d < 0 else d << 1
+            while d >= 32:
+                out.append(chr((32 | d & 31) + 63))
+                d >>= 5
+            out.append(chr(d + 63))
+    return ''.join(out)
+
+
+OSRM_OK = {'code': 'Ok', 'routes': [{'geometry': polyline6(COORDS), 'distance': 630 * 1609.344, 'duration': 9 * 3600}]}
 PLACES = {('TX', 'dallas'): (32.78, -96.8), ('MS', 'east'): (32.78, -86.0)}
 URL = '/api/route/?start=Dallas, TX&finish=East, MS'
 SHAPE = '_p~iF~ps|U_ulLnnqC_mqNvxq`@'  # Google's polyline example, read at 1e-6
@@ -18,11 +33,14 @@ LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
 
 
 def fake_get(osrm):
+    """osrm: one reply for every OSRM host, or a list with one per host."""
     def get(url, **kw):
-        if isinstance(osrm, Exception) and url.startswith(geo.OSRM):
-            raise osrm
+        host = next((h for h in geo.OSRM if url.startswith(h)), None)
+        reply = osrm[geo.OSRM.index(host)] if host and isinstance(osrm, list) else osrm
+        if host and isinstance(reply, Exception):
+            raise reply
         r = MagicMock()
-        r.json.return_value = osrm if url.startswith(geo.OSRM) else []  # Nominatim: nothing found
+        r.json.return_value = reply if host else []  # Nominatim: nothing found
         return r
     return get
 
@@ -45,11 +63,11 @@ class RouteApiTests(TestCase):
         with patch('routing.geo.http.get', side_effect=fake_get(osrm)) as get:
             return self.client.get(url), get
 
-    def truck(self, valhalla, url=URL + '&vehicle=truck'):
+    def truck(self, valhalla, url=URL + '&vehicle=truck', osrm=OSRM_OK):
         post = MagicMock(side_effect=valhalla) if isinstance(valhalla, Exception) else MagicMock()
         post.return_value.json.return_value = valhalla
         with patch('routing.geo.http.post', post):
-            r, get = self.get(url)
+            r, get = self.get(url, osrm)
         return r, post.call_count + get.call_count
 
     def test_truck_uses_valhalla(self, *_):
@@ -62,7 +80,8 @@ class RouteApiTests(TestCase):
         self.assertTrue(body['map_url'].endswith('&vehicle=truck'))
 
     def test_truck_falls_back_to_osrm(self, *_):
-        for valhalla in (requests.ConnectionError('boom'), {'error_code': 154, 'error': 'too far'}):
+        for valhalla in (requests.ConnectionError('boom'), {'error_code': 154, 'error': 'too far'},
+                        {'trip': {'legs': [{'shape': '?'}], 'summary': {'length': 1, 'time': 1}}}):
             cache.clear()
             r, calls = self.truck(valhalla)
             self.assertEqual((r.status_code, calls, r.json()['external_api_calls']), (200, 2, 2))
@@ -149,8 +168,27 @@ class RouteApiTests(TestCase):
         self.assertEqual((body['distance_miles'], body['fuel_stops'], body['total_fuel_cost']), (0.0, [], 0.0))
 
     def test_routing_down(self, *_):
-        r, _ = self.get(osrm=requests.ConnectionError('boom'))
-        self.assertEqual((r.status_code, r.json()['error']), (502, 'routing_provider_error'))
+        r, get = self.get(osrm=requests.ConnectionError('boom'))
+        self.assertEqual((r.status_code, r.json()['error'], get.call_count), (502, 'routing_provider_error', 2))
+        r, calls = self.truck(requests.ReadTimeout('slow'), osrm=requests.ReadTimeout('slow'))
+        self.assertEqual((r.status_code, calls), (502, 3))  # worst case: Valhalla + both OSRM hosts
+
+    def test_second_osrm_host_on_failure(self, *_):
+        for primary in (requests.ReadTimeout('slow'), {'code': 'TooBig', 'message': 'busy'},
+                        {'code': 'Ok', 'routes': [{'geometry': '?', 'distance': 1, 'duration': 1}]}):
+            cache.clear()
+            r, get = self.get(osrm=[primary, OSRM_OK])
+            body = r.json()
+            self.assertEqual((r.status_code, get.call_count, body['external_api_calls']), (200, 2, 2))
+            self.assertEqual([c.args[0].startswith(h) for c, h in zip(get.call_args_list, geo.OSRM)], [True, True])
+            self.assertEqual(body['routing'], {'provider': 'osrm', 'profile': 'car', 'fallback': True})
+            self.assertEqual(body['distance_miles'], 630.0)
+        r, calls = self.truck(requests.ConnectionError('boom'), osrm=[requests.ReadTimeout('slow'), OSRM_OK])
+        self.assertEqual((r.status_code, calls, r.json()['external_api_calls']), (200, 3, 3))
+
+    def test_no_route_skips_second_host(self, *_):
+        r, get = self.get(osrm=[{'code': 'NoRoute', 'message': 'Impossible route'}, AssertionError('not called')])
+        self.assertEqual((r.status_code, get.call_count), (422, 1))
 
     def test_get_only(self, *_):
         r = Client(enforce_csrf_checks=True).post(URL)

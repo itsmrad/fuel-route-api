@@ -1,5 +1,8 @@
+import threading
 from decimal import Decimal
 from unittest.mock import patch
+
+import requests
 
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -66,6 +69,13 @@ class StationsAlongTests(TestCase):
         self.assertEqual([s.name for _, s in got], ['S1', 'S0'])  # S2 is ~34 mi off the route
         self.assertAlmostEqual(got[0][0], 5.8, delta=1)
         self.assertAlmostEqual(got[1][0], 29.0, delta=1)
+
+
+class DeadlineTests(SimpleTestCase):
+    @patch('routing.geo.DEADLINE', 0.05)
+    def test_slow_call_gives_up(self):
+        with self.assertRaises(requests.Timeout):
+            geo.call(lambda url, **kw: threading.Event().wait(1), 'https://slow')
 
 
 class Polyline6Tests(SimpleTestCase):

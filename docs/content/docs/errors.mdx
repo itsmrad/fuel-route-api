@@ -17,7 +17,7 @@ icon: TriangleAlert
 | `400` | `unknown_location` | The input is not a known `City, ST`, not `lat,lon`, and Nominatim found nothing in the USA. | Use `City, ST` with a two-letter state, or coordinates. |
 | `422` | `unreachable` | Some stretch of the route has no station within the 500-mile range. | Nothing to retry. `detail` names the gap's mile markers. |
 | `422` | `no_route` | No road connects start and finish (Hawaii to the mainland). | Nothing to retry. |
-| `502` | `routing_provider_error` | OSRM or Nominatim failed or timed out. | Retry after a second; the public OSRM server allows 1 request/s. |
+| `502` | `routing_provider_error` | Both OSRM servers (and Valhalla for trucks), or Nominatim, failed or timed out. | Retry after a second; the public OSRM server allows 1 request/s. |
 
 ## Examples
 
@@ -46,7 +46,7 @@ curl -s '/api/route/?start=Springfeld,%20ZZ&finish=Chicago,%20IL'
 <Tab value="502">
 
 ```json
-{ "error": "routing_provider_error", "detail": "OSRM did not respond within 10 s." }
+{ "error": "routing_provider_error", "detail": "routing provider unavailable: Read timed out. (read timeout=5)" }
 ```
 
 </Tab>

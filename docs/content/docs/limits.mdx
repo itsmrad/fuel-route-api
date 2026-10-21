@@ -9,7 +9,7 @@ Each shortcut is deliberate: it keeps the system to one process, one dependency 
 | Limit | Impact | Upgrade path |
 | --- | --- | --- |
 | Stations sit at their **city centroid** | Mile markers can be off by a few miles; a station just outside a big city may fall outside the 10-mile corridor. | Geocode station addresses once, offline, and store real coordinates. |
-| **OSRM public demo server** | Best-effort, ~1 request/s, ~1.4–1.7 s per route. Dominates cold latency. | Self-hosted OSRM, or OpenRouteService with a free key. A one-function swap in `get_route`. |
+| **Public OSRM servers** | Best-effort, ~1 request/s, ~0.6–1.0 s per route but erratic. The FOSSGIS server is the fallback; if both fail the request is a 502 within 16 s. | Self-hosted OSRM, or OpenRouteService with a free key. A one-function swap in `get_route`. |
 | **Truck routing capped at 1,500 km** | The public Valhalla server rejects longer `vehicle=truck` trips (NYC → LA, Miami → Seattle), so they fall back to OSRM car routes that may use truck-restricted roads. | Self-hosted Valhalla with a US extract lifts the cap; then `truck` can be the default. |
 | **Sparse data in the West** | Only 8 California stations, all near the Mexican border. NYC → LA has no station for its last ~273 miles. | A fuller price feed. The optimizer needs no change. |
 | **Price snapshot** | Prices never update on their own. | Scheduled `load_stations` against a live feed. |
