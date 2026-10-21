@@ -20,6 +20,8 @@ jobs:
         working-directory: api
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # setup-uv publishes no floating major tag; caching is on by default for hosted runners.
       - uses: astral-sh/setup-uv@v10.3.0
         with:
@@ -34,6 +36,8 @@ jobs:
         working-directory: docs
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
