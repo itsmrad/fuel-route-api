@@ -16,7 +16,7 @@ Live docs and demo: (deployment URL — added in deploy step)
 | 500-mile range, multiple stops | Range is a hard constraint; stops are chosen along the whole route. Gaps over 500 mi return 422. | `optimizer.py` |
 | Total money spent at 10 MPG | `total_fuel_cost` (fuel bought on the way) and `cost_of_fuel_consumed` (all fuel used). Money math in `Decimal`. | `optimizer.py` |
 | Use the provided price file | Deduplicated and geocoded once by `manage.py load_stations`. | `api/data/fuel-prices.csv` |
-| Free routing API, few calls | OSRM public server, one call returns geometry, distance and duration. | `geo.get_route` |
+| Free routing API, few calls | OSRM public server, one call returns geometry, distance and duration. `vehicle=truck` uses Valhalla truck costing (opt-in, see Limits). | `geo.get_route` |
 | Fast | Cold ~1.5 s (almost all OSRM), cached 15–40 ms. | see Performance |
 | Latest Django | Django 6.1, plain `JsonResponse`, no DRF. | `api/pyproject.toml` |
 
@@ -38,7 +38,7 @@ Postman: import [`postman_collection.json`](postman_collection.json) (12 request
 
 ## API
 
-`GET /api/route/?start=<loc>&finish=<loc>[&stop_penalty=<usd>]` · `GET /api/route/map/?…` (HTML) · `GET /api/openapi.yaml` (OpenAPI 3.1)
+`GET /api/route/?start=<loc>&finish=<loc>[&stop_penalty=<usd>][&vehicle=car|truck]` · `GET /api/route/map/?…` (HTML) · `GET /api/openapi.yaml` (OpenAPI 3.1)
 
 ```bash
 curl -s 'http://127.0.0.1:8000/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL'
@@ -52,6 +52,7 @@ Real response, route coordinates trimmed:
   "finish": { "query": "Chicago, IL", "lat": 41.837, "lon": -87.6849 },
   "distance_miles": 961.0,
   "duration_hours": 17.0,
+  "routing": { "provider": "osrm", "profile": "car", "fallback": false },
   "fuel_stops": [
     { "mile": 161.6, "name": "EXTRA MILE TRUCK STOP", "address": "I-30 EXIT 208", "city": "Hooks", "state": "TX",
       "lat": 33.4707, "lon": -94.2865, "price": 2.817, "gallons": 16.1, "cost": 45.36 },
@@ -63,7 +64,7 @@ Real response, route coordinates trimmed:
   "cost_of_fuel_consumed": 277.74,
   "stop_penalty": 15.0,
   "route": { "type": "LineString", "coordinates": [[-96.76642, 32.79325], [-96.76619, 32.79338], "…"] },
-  "map_url": "http://127.0.0.1:8000/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0",
+  "map_url": "http://127.0.0.1:8000/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0&vehicle=car",
   "external_api_calls": 1
 }
 ```
@@ -75,12 +76,12 @@ Assumption: the truck starts with a full tank, so `total_fuel_cost` is fuel boug
 ## How it works
 
 1. **Resolve** start and finish: Census table or `lat,lon` locally (0 calls), else Nominatim (+1 each).
-2. **Route** with OSRM `/route/v1/driving`: 1 call, full geometry.
+2. **Route** with OSRM `/route/v1/driving`: 1 call, full geometry. `vehicle=truck`: Valhalla `costing=truck` (Class 8: 4.11 m, 2.6 m, 21.64 m, 36.3 t); on failure or over the public server's 1,500 km cap, OSRM car with `routing.fallback: true`.
 3. **Corridor match**: in-memory 0.5° grid index keeps stations within 10 mi of the polyline, each with a mile marker.
 4. **Optimize** stops (below).
-5. **Respond**. The route (distance, line, corridor) is cached on the resolved coordinates, so another spelling or `stop_penalty` re-runs only the optimizer; the map page reads the same entry.
+5. **Respond**. The route (distance, line, corridor) is cached on the vehicle and resolved coordinates, so another spelling or `stop_penalty` re-runs only the optimizer; the map page reads the same entry.
 
-External call budget: **1** typical, **≤ 3** worst case (2 Nominatim + OSRM), **0** cached. Reported per response as `external_api_calls`.
+External call budget: **1** typical, **≤ 3** worst case (2 Nominatim + OSRM; 4 if a truck route falls back), **0** cached. Reported per response as `external_api_calls`.
 
 ## Optimizer
 
@@ -112,7 +113,7 @@ The CSV has no coordinates and addresses like `I-44, EXIT 283 & US-69`. `load_st
 ## Tests
 
 ```bash
-cd api && uv run python manage.py test   # 24 tests, no network (OSRM mocked)
+cd api && uv run python manage.py test   # 33 tests, no network (OSRM/Valhalla mocked)
 ```
 
 Optimizer cases (cheap-ahead, fill-up, short trip, unreachable gap, exact cents, DP vs brute force), geocoding, and the endpoint (asserts 1 external call, then 0 on repeat).
@@ -142,6 +143,7 @@ plan.md                  design notes
 | --- | --- |
 | Stations at city centroid | Geocode station addresses once, offline |
 | OSRM public demo server (best-effort, ~1 req/s) | Self-hosted OSRM or OpenRouteService; one-function swap in `get_route` |
+| Truck routing opt-in: public Valhalla caps trips at 1,500 km, so coast-to-coast falls back to OSRM car | Self-hosted Valhalla, then default `vehicle=truck` |
 | Sparse West Coast data | Fuller price feed; optimizer unchanged |
 | Price snapshot | Scheduled `load_stations` from a live feed |
 | File cache, one box | Redis when there is more than one box |
