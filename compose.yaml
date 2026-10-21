@@ -3,7 +3,7 @@ services:
     build: ./api
     environment:
       DEBUG: "0"
-      SECRET_KEY: dev-only-not-secret
+      SECRET_KEY: ${SECRET_KEY:-dev-only-not-secret}  # override for anything beyond local review
       ALLOWED_HOSTS: localhost,127.0.0.1,api
     ports: ["${API_PORT:-8000}:8000"]
     healthcheck:
