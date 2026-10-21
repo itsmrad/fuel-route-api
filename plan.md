@@ -48,6 +48,7 @@ Stations are sorted by mile marker; the destination is a virtual station with pr
   - Otherwise → **fill up** here and go to the **cheapest** station in range.
   - If no station is in range and the destination is too far → return a 422 `unreachable` error naming the gap.
 - Complexity is O(n·k), with n = stations on the route (low hundreds), so it runs in under 1 ms.
+- `Station.price` is a `DecimalField`: keep the money math in `Decimal` (convert miles/gallons with `Decimal(str(x))`) and never mix `Decimal` × `float`, which raises `TypeError`.
 
 ### Why each piece is the simplest thing that works
 - **Plain Django + `JsonResponse`** for one endpoint; no DRF.
@@ -62,7 +63,7 @@ Stations are sorted by mile marker; the destination is a virtual station with pr
 
 ## 4. API contract
 
-`GET /api/route/?start=<loc>&finish=<loc>`
+`GET /api/route/?start=<loc>&finish=<loc>`. The spec lives in **`api/openapi.yaml` (OpenAPI 3.1)**. Django also serves it at `/api/openapi.yaml`, and the docs site's API Reference is generated from it.
 
 ```json
 {
@@ -85,26 +86,51 @@ Stations are sorted by mile marker; the destination is a virtual station with pr
 ```
 Errors: `400` (missing input, unknown or non-US location), `422` (unreachable gap of more than 500 mi), `502` (routing provider down).
 
-## 5. Repo layout (deliberately small)
+## 5. Repo layout (monorepo)
 
 ```
 fuel-route-api/
-  manage.py
-  requirements.txt            django, requests, gunicorn
-  config/                     settings.py, urls.py, wsgi.py
-  routing/
-    models.py                 Station
-    management/commands/load_stations.py
-    geo.py                    resolve location, OSRM call, stations-near-route
-    optimizer.py              plan_fuel_stops()
-    views.py                  route_api, route_map
-    templates/routing/map.html
-    tests.py
-  data/fuel-prices.csv        (Census files downloaded by load_stations, gitignored)
-  deploy/                     Caddyfile, fuel-route.service, deploy.sh
-  postman_collection.json
+  api/                        Django project
+    manage.py
+    requirements.txt          django, requests, gunicorn
+    openapi.yaml              OpenAPI 3.1 spec (also served at /api/openapi.yaml)
+    config/                   settings.py, urls.py, wsgi.py
+    routing/
+      models.py               Station
+      management/commands/load_stations.py
+      geo.py                  resolve location, OSRM call, stations-near-route
+      optimizer.py            plan_fuel_stops()
+      views.py                route_api, route_map, openapi spec
+      templates/routing/map.html
+      tests.py
+    data/fuel-prices.csv      (Census files downloaded by load_stations, gitignored)
+    postman_collection.json
+  docs/                       Fumadocs (Next.js) docs site, see "Docs site" below
+  deploy/                     Caddyfile, systemd units (gunicorn + next start), deploy.sh
+  plan.md
   README.md
 ```
+
+## 5a. Docs site (Fumadocs)
+
+Next.js + Fumadocs in `docs/`. Dark-first UI in the style of a polished product docs site: sidebar, ⌘K search, TOC, theme toggle.
+
+| Page | Contents |
+|---|---|
+| Overview | What it does, the response at a glance |
+| Quickstart | Clone → run → first request |
+| Architecture | Diagram of the request flow (section 3) |
+| How the optimizer works | Greedy "fill or not to fill", why it's optimal |
+| Data & geocoding | CSV dedupe, Census Gazetteer matching, coverage |
+| Interactive Route Planner | Start/finish inputs + "Plan route" button → calls the live API; renders route + fuel stops on a map with a cost breakdown, an external-call badge, and latency |
+| API Reference | Generated from `api/openapi.yaml` via `fumadocs-openapi`, with an interactive playground ("Send" buttons) |
+| Errors | 400 / 422 / 502 with examples |
+| Deployment | Lightsail, Caddy, systemd |
+| Limits | Centroid positions, OSRM demo quota, upgrade paths |
+
+Skipped: "Ask AI" (needs an LLM backend).
+
+**No CORS code.** The browser always calls same-origin `/api/*`. In dev, a Next.js rewrite sends `/api/*` → `http://127.0.0.1:8000`. In prod, Caddy routes `/api/*` → gunicorn and everything else → Next.js.
 
 ## 6. Git workflow (branch by branch)
 
@@ -112,29 +138,35 @@ Prerequisites: `gh auth status` OK; CodeRabbit and/or Kilo Code GitHub app insta
 
 | # | Branch | Contents | Done when |
 |---|---|---|---|
-| 0 | `main` | `django-admin startproject`, `.gitignore`, `requirements.txt`, README stub | First push; repo `fuel-route-api` created via `gh repo create` (public) |
-| 1 | `feat/station-data` | `Station` model, migration, `load_stations` (CSV dedupe → Census geocode), unmatched-city report | Command loads ~6.5k US stations |
+| 0 ✅ | `main` | `django-admin startproject`, `.gitignore`, `requirements.txt`, README stub | First push; repo `fuel-route-api` created via `gh repo create` (public) |
+| 1 ✅ | `feat/station-data` (PR #1) | `Station` model, migration, `load_stations` (CSV dedupe → Census geocode), unmatched-city report | Command loads ~6.5k US stations |
+| 1a | `chore/monorepo` | Move the Django project into `api/`; plan + README for the monorepo | `check`, `test`, `load_stations` pass from `api/` |
 | 2 | `feat/routing` | `geo.py`: local resolver + Nominatim fallback, OSRM client (User-Agent, timeout), stations-near-route | Dallas→Chicago returns route + corridor stations |
 | 3 | `feat/fuel-optimizer` | `optimizer.py` + unit tests (cheap-ahead, fill-up, under-500 mi, unreachable gap, exact cost math) | Tests green |
-| 4 | `feat/api-endpoint` | Views, URLs, cache, Leaflet map page, endpoint test with OSRM mocked (asserts 1 call, then 0 on repeat) | Postman returns JSON; map renders |
+| 3a | `feat/docs-site` | Fumadocs site in `docs/` (section 5a), `/api/*` dev rewrite | `npm run build` passes; pages render |
+| 4 | `feat/api-endpoint` | Views, URLs, cache, Leaflet map page, `openapi.yaml` + `/api/openapi.yaml`, endpoint test with OSRM mocked (asserts 1 call, then 0 on repeat) | Postman returns JSON; map renders; API Reference renders the spec |
 | 5 | `docs/readme-postman` | README (setup in 3 commands, assumptions, call budget, limits), Postman collection | Fresh clone works by following the README |
-| 6 | `deploy/lightsail` | Prod settings via env vars, gunicorn systemd unit, Caddyfile, `deploy.sh` | Live HTTPS URL in README |
+| 6 | `deploy/lightsail` | Prod settings via env vars, gunicorn + `next start` systemd units, Caddyfile (path routing), `deploy.sh` | Live HTTPS URL in README |
+
+Steps 2, 3 and 3a are independent and run in parallel (one `git worktree` each). Step 4 follows once they merge, then 5 and 6.
 
 Per branch: commit in small logical steps → `git push -u` → `gh pr create` → wait for the CodeRabbit/Kilo review (`gh pr view --comments`) → fix valid comments and reply to the rest → `gh pr merge --squash --delete-branch`.
+
+CodeRabbit auto-review is skipped on this repo, so trigger it by commenting `@coderabbitai review` on the PR.
 
 ## 7. Deployment (AWS Lightsail)
 
 1. Lightsail instance: Ubuntu 24.04, smallest plan ($5/mo is enough), static IP attached, ports 80/443 open.
-2. On the box: `python3 -m venv`, `pip install -r requirements.txt`, `migrate`, `load_stations`, `collectstatic`.
-3. `gunicorn config.wsgi -w 3 -b 127.0.0.1:8000` under systemd.
-4. Caddy reverse proxy with automatic HTTPS. With no domain, use `<ip>.sslip.io` for a free valid certificate.
+2. On the box, in `api/`: `python3 -m venv`, `pip install -r requirements.txt`, `migrate`, `load_stations`, `collectstatic`. In `docs/`: Node LTS, `npm ci && npm run build`.
+3. systemd units: `gunicorn config.wsgi -w 3 -b 127.0.0.1:8000` (from `api/`) and `next start -p 3000` (from `docs/`).
+4. Caddy reverse proxy with automatic HTTPS and path routing: `/api/*` → `127.0.0.1:8000`, everything else → `127.0.0.1:3000`. With no domain, use `<ip>.sslip.io` for a free valid certificate.
 5. `DEBUG=False`, `SECRET_KEY`, and `ALLOWED_HOSTS` set from an env file; simple per-IP throttle in Caddy to protect the free OSRM quota.
-6. `deploy/deploy.sh`: `git pull && pip install && migrate && systemctl restart`.
+6. `deploy/deploy.sh`: `git pull && pip install && migrate && npm ci && npm run build && systemctl restart` (both units).
 
 **Needed from you:** either (a) an IAM user's access keys scoped to Lightsail, so I create the instance with the AWS CLI, or (b) an instance you create, plus its SSH key path and IP. Option (b) is safer because I never hold AWS keys. Optionally, a domain name.
 
 ## 8. Testing and performance targets
-- `python manage.py test`: optimizer cases + endpoint (OSRM mocked, no network).
+- `cd api && python manage.py test`: optimizer cases + endpoint (OSRM mocked, no network).
 - Targets: cold request under 1.5 s (dominated by OSRM), cached request under 50 ms, compute part under 50 ms.
 - Manual cross-country check: NYC→LA (~2,800 mi, 5+ stops), Miami→Seattle, a short trip (Austin→Dallas, 0 stops).
 
