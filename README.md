@@ -1,5 +1,7 @@
 # Fuel Route API
 
+[![CI](https://github.com/itsmrad/fuel-route-api/actions/workflows/ci.yml/badge.svg)](https://github.com/itsmrad/fuel-route-api/actions/workflows/ci.yml)
+
 Django API: give it a start and finish in the USA, get back the driving route, the cost-optimal fuel stops for a 500-mile-range, 10 MPG truck, and the total fuel cost. One external call per request, zero on a cache hit.
 
 Live docs and demo: (deployment URL — added in deploy step)
