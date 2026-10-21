@@ -143,7 +143,7 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: routing_provider_error
-                detail: OSRM did not respond within 10 s.
+                detail: 'routing provider unavailable: Read timed out. (read timeout=5)'
   /api/route/map/:
     get:
       operationId: routeMap
@@ -344,7 +344,7 @@ components:
               enum: [car, truck]
             fallback:
               type: boolean
-              description: true when `vehicle=truck` was asked for but the route is OSRM car.
+              description: true when the first-choice router was not used, i.e. `vehicle=truck` got an OSRM car route, or the OSRM demo server failed and the FOSSGIS OSRM server answered.
         fuel_stops:
           type: array
           description: Ordered by mile. Empty when the trip fits in one tank.
@@ -377,8 +377,8 @@ components:
         external_api_calls:
           type: integer
           minimum: 0
-          maximum: 4
-          description: Calls made to OSRM/Valhalla/Nominatim for this request. 0 on a cache hit, 2 routing calls when a truck route fell back to OSRM.
+          maximum: 5
+          description: Calls made to OSRM/Valhalla/Nominatim for this request. 0 on a cache hit; at most 3 routing calls (Valhalla, OSRM demo, FOSSGIS OSRM) plus 1 per Nominatim lookup.
           examples: [1]
     Error:
       type: object
