@@ -18,6 +18,8 @@ Three choices carry the design:
 - **Offline geocoding.** The price CSV has no coordinates. Stations are placed at their city's Census centroid, computed once by `load_stations`.
 - **An exact optimizer that counts stops.** A dynamic program over (station, fuel) minimises fuel cost plus $15 per stop, so NYC → LA takes 7 stops instead of 17 for $3.88 more fuel. It runs in about 20 ms. See [How the optimizer works](/docs/optimizer).
 
+Every decision behind these, the options rejected and the measured result: [Engineering decisions](/docs/engineering-decisions).
+
 ## The response at a glance
 
 ```json title="GET /api/route/?start=Dallas, TX&finish=Chicago, IL"
