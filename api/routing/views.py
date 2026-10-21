@@ -12,22 +12,22 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.defaults import page_not_found
 
 from routing import geo
-from routing.optimizer import Unreachable, plan_fuel_stops
+from routing.optimizer import STOP_PENALTY, Unreachable, plan_fuel_stops
 
 RANGE_MILES = 500
 MAX_ROUTE_POINTS = 5000  # ~150 KB of coordinates for NYC->LA
 
 
-def plan(start_q, finish_q):
+def plan(start_q, finish_q, stop_penalty=STOP_PENALTY):
     """(result, external calls made). Cached on normalized input, so a repeat costs 0 calls."""
-    norm = ' '.join(start_q.lower().split()) + '|' + ' '.join(finish_q.lower().split())
+    norm = ' '.join(start_q.lower().split()) + '|' + ' '.join(finish_q.lower().split()) + f'|{stop_penalty!r}'
     key = 'route:' + hashlib.sha1(norm.encode()).hexdigest()
     if (hit := cache.get(key)) is not None:
         return hit, 0
     start, finish = geo.resolve(start_q), geo.resolve(finish_q)
     route = geo.get_route(start, finish)
     fuel = plan_fuel_stops([(m, s.price, s) for m, s in geo.stations_along(route['coords'])],
-                           route['distance_miles'], range_miles=RANGE_MILES)
+                           route['distance_miles'], range_miles=RANGE_MILES, stop_penalty=stop_penalty)
     coords = route['coords']
     # ponytail: keep every Nth point for the response only; Douglas-Peucker if the line looks jagged when zoomed in
     step = math.ceil(len(coords) / MAX_ROUTE_POINTS)
@@ -45,6 +45,7 @@ def plan(start_q, finish_q):
         'total_gallons_purchased': fuel['total_gallons'],
         'total_fuel_cost': fuel['total_cost'],
         'cost_of_fuel_consumed': fuel['cost_of_fuel_consumed'],
+        'stop_penalty': stop_penalty,
         'route': {'type': 'LineString', 'coordinates': [[round(x, 5), round(y, 5)] for x, y in line]},
     }
     cache.set(key, result)
@@ -69,12 +70,18 @@ def api_get(view):
 
 
 def plan_for(request):
-    """(result, None) or (None, JSON error response) for the request's start/finish."""
-    start, finish = (request.GET.get(k, '').strip() for k in ('start', 'finish'))
+    """(result, None) or (None, JSON error response) for the request's start/finish/stop_penalty."""
+    start, finish, penalty = (request.GET.get(k, '').strip() for k in ('start', 'finish', 'stop_penalty'))
     if not start or not finish:
         return None, error(400, 'missing_parameter', 'Both "start" and "finish" are required.')
     try:
-        result, calls = plan(start, finish)
+        penalty = float(penalty) if penalty else STOP_PENALTY
+        if not 0 <= penalty < math.inf:
+            raise ValueError
+    except ValueError:
+        return None, error(400, 'invalid_parameter', '"stop_penalty" must be a number >= 0 (USD per stop).')
+    try:
+        result, calls = plan(start, finish, penalty)
     except ValueError as e:
         return None, error(400, 'unknown_location', f'Could not resolve to a US location: {e}')
     except Unreachable as e:
@@ -83,7 +90,7 @@ def plan_for(request):
                                                f'({b - a:.1f} mi gap, range is {RANGE_MILES} mi).')
     except geo.RoutingError as e:
         return None, error(502, 'routing_provider_error', str(e))
-    query = urlencode({'start': start, 'finish': finish})
+    query = urlencode({'start': start, 'finish': finish, 'stop_penalty': penalty})
     result['start']['query'], result['finish']['query'] = start, finish  # cache hit may have other spelling
     result['map_url'] = request.build_absolute_uri(f"{reverse('route_map')}?{query}")
     result['external_api_calls'] = calls
@@ -99,9 +106,9 @@ def route_api(request):
 @api_get
 def route_map(request):
     if not request.GET.get('start') and not request.GET.get('finish'):
-        return render(request, 'routing/map.html', {})  # empty demo form
+        return render(request, 'routing/map.html', {'default_penalty': STOP_PENALTY})  # empty demo form
     result, err = plan_for(request)
-    return err or render(request, 'routing/map.html', {'plan': result})
+    return err or render(request, 'routing/map.html', {'plan': result, 'default_penalty': STOP_PENALTY})
 
 
 @api_get
