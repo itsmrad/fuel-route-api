@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if plan %}{{ plan.start.query }} to {{ plan.finish.query }}{% else %}Fuel route map{% endif %}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
+  form { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; background: #1b1b1b; border-bottom: 1px solid #333; }
+  input { flex: 1 1 160px; padding: 8px; border: 1px solid #444; border-radius: 6px; background: #222; color: inherit; font: inherit; }
+  button { padding: 8px 16px; border: 0; border-radius: 6px; background: #2f80ed; color: #fff; font: inherit; cursor: pointer; }
+  #map { flex: 1; min-height: 300px; }
+  .panel { position: absolute; z-index: 1000; left: 12px; bottom: 24px; max-width: calc(100% - 24px); padding: 10px 14px;
+           background: rgba(20, 20, 20, .92); border: 1px solid #333; border-radius: 8px; }
+  .panel b { color: #fff; }
+  .stop { width: 24px; height: 24px; border-radius: 50%; background: #f2994a; color: #111; font-weight: 700;
+          display: grid; place-items: center; border: 2px solid #fff; }
+</style>
+</head>
+<body>
+<form method="get">
+  <input name="start" placeholder="Start, e.g. Dallas, TX" value="{{ request.GET.start }}" required aria-label="Start">
+  <input name="finish" placeholder="Finish, e.g. Chicago, IL" value="{{ request.GET.finish }}" required aria-label="Finish">
+  <button>Plan route</button>
+</form>
+<div style="position: relative; flex: 1; display: flex;">
+  <div id="map"></div>
+  {% if plan %}<div class="panel">
+    <b>{{ plan.distance_miles }} mi</b> · {{ plan.duration_hours }} h ·
+    <b>${{ plan.total_fuel_cost }}</b> at {{ plan.fuel_stops|length }} stop{{ plan.fuel_stops|length|pluralize }}<br>
+    {{ plan.total_gallons_purchased }} gal bought · fuel burned worth ${{ plan.cost_of_fuel_consumed }}
+  </div>{% endif %}
+</div>
+{{ plan|json_script:"plan" }}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  const plan = JSON.parse(document.getElementById('plan').textContent);
+  const map = L.map('map').setView([39.5, -98.35], 4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  }).addTo(map);
+  if (plan) {
+    const line = L.polyline(plan.route.coordinates.map(([lon, lat]) => [lat, lon]), { color: '#2f80ed', weight: 4 }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [24, 24] });
+    for (const p of [plan.start, plan.finish])
+      L.circleMarker([p.lat, p.lon], { radius: 7, color: '#fff', fillColor: '#27ae60', fillOpacity: 1 }).bindPopup(p.query).addTo(map);
+    const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+    plan.fuel_stops.forEach((s, i) => L.marker([s.lat, s.lon], { icon: L.divIcon({ className: '', html: `<div class="stop">${i + 1}</div>`, iconSize: [24, 24] }) })
+      .bindPopup(`<b>${i + 1}. ${esc(s.name)}</b><br>${esc(s.address)}, ${esc(s.city)}, ${esc(s.state)}<br>Mile ${s.mile} · $${s.price}/gal<br>${s.gallons} gal = <b>$${s.cost}</b>`)
+      .addTo(map));
+  }
+</script>
+</body>
+</html>
