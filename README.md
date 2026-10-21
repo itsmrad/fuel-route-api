@@ -116,7 +116,7 @@ The CSV has no coordinates and addresses like `I-44, EXIT 283 & US-69`. `load_st
 ## Tests
 
 ```bash
-cd api && uv run python manage.py test   # 36 tests, no network (OSRM/Valhalla mocked)
+cd api && uv run python manage.py test   # 38 tests, no network (OSRM/Valhalla mocked)
 ```
 
 Optimizer cases (cheap-ahead, fill-up, short trip, unreachable gap, exact cents, DP vs brute force), geocoding, and the endpoint (asserts 1 external call, then 0 on repeat).

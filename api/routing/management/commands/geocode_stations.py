@@ -22,6 +22,7 @@ INTERSTATE = re.compile(r'\bI-?\s?\d')
 GOOD_TYPES = {'building', 'amenity', 'street'}
 MIN_CONFIDENCE = 0.5
 MAX_MILES = 25
+MAX_POLLS = 180  # per job, 1/min; the 5,000-address run needed ~80 in total
 
 
 def accept(hit, centroid, address):
@@ -79,28 +80,35 @@ class Command(BaseCommand):
             except requests.RequestException as e:  # never let the key reach the console
                 raise CommandError(str(e).replace(key, '***')) from None
 
-        raw = settings.BASE_DIR / '.cache' / 'geoapify_raw.json'  # paid-for answers; re-filtering costs nothing
-        hits = json.loads(raw.read_text()) if raw.exists() else {}
-        send = [q for q in todo if q not in hits]
-        self.stdout.write(f'{len(todo) - len(send)} answers cached, {len(send)} to send')
+        cache_dir = settings.BASE_DIR / '.cache'
+        cache_dir.mkdir(exist_ok=True)
+        raw, pending = cache_dir / 'geoapify_raw.json', cache_dir / 'geoapify_jobs.json'
+        hits = json.loads(raw.read_text()) if raw.exists() else {}  # paid-for answers; re-filtering costs nothing
+        jobs = json.loads(pending.read_text()) if pending.exists() else {}  # {job id: addresses}; kept 24 h server-side
+        queued = {q for chunk in jobs.values() for q in chunk}
+        send = [q for q in todo if q not in hits and q not in queued]
+        self.stdout.write(f'{len(hits)} answers cached, {len(jobs)} jobs to resume, {len(send)} addresses to send')
         params = {'apiKey': key, 'filter': 'countrycode:us', 'lang': 'en'}
-        chunks = [send[i:i + 1000] for i in range(0, len(send), 1000)]
-        jobs = [call('POST', params=params, json=chunk)[1]['id'] for chunk in chunks]
-        self.stdout.write(f'submitted {len(jobs)} jobs')
+        for i in range(0, len(send), 1000):
+            jobs[call('POST', params=params, json=send[i:i + 1000])[1]['id']] = send[i:i + 1000]
+            pending.write_text(json.dumps(jobs))  # a crash after this resumes the job instead of paying twice
 
         polls = 0
-        for job, chunk in zip(jobs, chunks):
-            while True:
+        for job, chunk in list(jobs.items()):
+            for _ in range(MAX_POLLS):
                 time.sleep(60)  # each poll costs a credit
                 status, data = call('GET', params={'apiKey': key, 'id': job, 'format': 'json'})
                 polls += 1
                 if status == 200 and isinstance(data, list):
                     break
-            if len(data) != len(chunk):
-                raise CommandError(f'job returned {len(data)} results for {len(chunk)} addresses')
-            hits.update(zip(chunk, data))  # results come back in input order
-            raw.parent.mkdir(exist_ok=True)
+            else:
+                raise CommandError(f'job still pending after {MAX_POLLS} polls; re-run later to resume it')
+            if [h.get('query', {}).get('text') for h in data] != chunk:
+                raise CommandError('job results do not line up with the submitted addresses')
+            hits.update(zip(chunk, data, strict=True))
+            del jobs[job]
             raw.write_text(json.dumps(hits))
+            pending.write_text(json.dumps(jobs))
             self.stdout.write(f'{len(hits)} answers saved')
 
         accepted = 0
@@ -118,5 +126,5 @@ class Command(BaseCommand):
             w = csv.DictWriter(f, ['opis_id', 'lat', 'lon', 'source', 'confidence'])
             w.writeheader()
             w.writerows(done[k] for k in sorted(done))
-        self.stdout.write(f'accepted {accepted} stations; {len(jobs)} jobs, {polls} polls, '
-                          f'~{len(send) / 2 + len(jobs) + polls:.0f} credits')
+        self.stdout.write(f'accepted {accepted} stations; {polls} polls, '
+                          f'~{len(send) / 2 + len(send) / 1000 + polls:.0f} credits')
