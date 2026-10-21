@@ -23,13 +23,14 @@ paths:
       tags: [Route]
       summary: Plan a route with fuel stops
       description: |
-        Resolves both locations, fetches one driving route from OSRM, finds stations within
+        Resolves both locations, fetches one driving route (OSRM car, or Valhalla truck with `vehicle=truck`), finds stations within
         10 miles of the route, and picks stops with a dynamic program that minimises fuel cost plus
         `stop_penalty` per stop. The vehicle starts with a full tank (500 miles).
       parameters:
         - $ref: '#/components/parameters/Start'
         - $ref: '#/components/parameters/Finish'
         - $ref: '#/components/parameters/StopPenalty'
+        - $ref: '#/components/parameters/Vehicle'
       responses:
         '200':
           description: Route planned.
@@ -45,6 +46,7 @@ paths:
                     finish: { query: 'Chicago, IL', lat: 41.8781, lon: -87.6298 }
                     distance_miles: 925.4
                     duration_hours: 13.6
+                    routing: { provider: osrm, profile: car, fallback: false }
                     fuel_stops:
                       - mile: 412.3
                         name: 'PILOT TRAVEL CENTER #123'
@@ -77,7 +79,7 @@ paths:
                         - [-95.2228, 36.5384]
                         - [-89.6543, 39.1753]
                         - [-87.6298, 41.8781]
-                    map_url: https://fuel-route.example.com/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0
+                    map_url: https://fuel-route.example.com/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0&vehicle=car
                     external_api_calls: 1
                 austinToDallas:
                   summary: Austin, TX to Dallas, TX (short trip, 0 stops)
@@ -86,6 +88,7 @@ paths:
                     finish: { query: 'Dallas, TX', lat: 32.7767, lon: -96.797 }
                     distance_miles: 195.3
                     duration_hours: 3.0
+                    routing: { provider: osrm, profile: car, fallback: false }
                     fuel_stops: []
                     total_gallons_purchased: 0
                     total_fuel_cost: 0
@@ -97,7 +100,7 @@ paths:
                         - [-97.7431, 30.2672]
                         - [-97.1467, 31.5493]
                         - [-96.797, 32.7767]
-                    map_url: https://fuel-route.example.com/api/route/map/?start=Austin%2C+TX&finish=Dallas%2C+TX&stop_penalty=15.0
+                    map_url: https://fuel-route.example.com/api/route/map/?start=Austin%2C+TX&finish=Dallas%2C+TX&stop_penalty=15.0&vehicle=car
                     external_api_calls: 0
         '400':
           description: Missing or invalid input, or a location that is unknown or outside the USA.
@@ -113,7 +116,7 @@ paths:
                   summary: Unknown location
                   value: { error: unknown_location, detail: 'Could not resolve "Springfeld, ZZ" to a US location.' }
                 invalid:
-                  summary: Invalid stop_penalty
+                  summary: Invalid stop_penalty or vehicle
                   value: { error: invalid_parameter, detail: '"stop_penalty" must be a number >= 0 (USD per stop).' }
         '422':
           description: No station within range for some stretch of the route (gap above 500 miles), or no road at all.
@@ -154,6 +157,7 @@ paths:
         - $ref: '#/components/parameters/Start'
         - $ref: '#/components/parameters/Finish'
         - $ref: '#/components/parameters/StopPenalty'
+        - $ref: '#/components/parameters/Vehicle'
       responses:
         '200':
           description: Map page.
@@ -215,6 +219,20 @@ components:
         minimum: 0
         default: 15
       example: 15
+    Vehicle:
+      name: vehicle
+      in: query
+      required: false
+      description: |
+        `car` routes with OSRM. `truck` routes with Valhalla truck costing (Class 8 tractor-trailer: 4.11 m high,
+        2.6 m wide, 21.64 m long, 36.3 t), so low bridges and truck-restricted roads are avoided. The public
+        Valhalla server only accepts trips up to 1,500 km straight-line; longer trips, or a Valhalla failure, fall
+        back to OSRM car and say so in `routing`.
+      schema:
+        type: string
+        enum: [car, truck]
+        default: car
+      example: truck
   schemas:
     Location:
       type: object
@@ -298,6 +316,7 @@ components:
         - total_fuel_cost
         - cost_of_fuel_consumed
         - stop_penalty
+        - routing
         - route
         - map_url
         - external_api_calls
@@ -312,6 +331,20 @@ components:
         duration_hours:
           type: number
           examples: [13.6]
+        routing:
+          type: [object, 'null']
+          description: Which router produced the route. null when start and finish are the same point.
+          required: [provider, profile, fallback]
+          properties:
+            provider:
+              type: string
+              enum: [osrm, valhalla]
+            profile:
+              type: string
+              enum: [car, truck]
+            fallback:
+              type: boolean
+              description: true when `vehicle=truck` was asked for but the route is OSRM car.
         fuel_stops:
           type: array
           description: Ordered by mile. Empty when the trip fits in one tank.
@@ -344,8 +377,8 @@ components:
         external_api_calls:
           type: integer
           minimum: 0
-          maximum: 3
-          description: Calls made to OSRM/Nominatim for this request. 0 on a cache hit.
+          maximum: 4
+          description: Calls made to OSRM/Valhalla/Nominatim for this request. 0 on a cache hit, 2 routing calls when a truck route fell back to OSRM.
           examples: [1]
     Error:
       type: object

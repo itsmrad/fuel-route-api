@@ -31,6 +31,10 @@ LSAD = re.compile(
 UA = {'User-Agent': 'fuel-route-api/1.0 (github.com/itsmrad/fuel-route-api)'}
 NOMINATIM = 'https://nominatim.openstreetmap.org/search'
 OSRM = 'https://router.project-osrm.org/route/v1/driving/'
+VALHALLA = 'https://valhalla1.openstreetmap.de/route'
+TRUCK = {'height': 4.11, 'width': 2.6, 'length': 21.64, 'weight': 36.3}  # Class 8 tractor-trailer: m, m, m, t
+TRUCK_MAX_MILES = 930  # FOSSGIS rejects truck routes over 1,500 km straight-line (error 154)
+NO_PATH = {170, 442}  # Valhalla: unconnected regions, no path
 # CONUS west (49th parallel, keeps Vancouver out), CONUS east (Northwest Angle), AK, Aleutians, HI.
 # ponytail: boxes still admit southern Ontario and northern Mexico; a border polygon if that matters
 USA = [(24, 49.01, -125, -95.2), (24, 49.4, -95.2, -66), (51, 72, -180, -129), (51, 53, 172, 180), (18.5, 22.5, -161, -154)]
@@ -156,8 +160,24 @@ def nominatim(q):
     return hits, True
 
 
-def get_route(start, finish):
-    """One OSRM call. coords are GeoJSON [lon, lat] pairs."""
+def get_route(start, finish, vehicle='car'):
+    """Route with coords as GeoJSON [lon, lat] pairs, plus 'routing' and the external 'calls' made.
+    truck: Valhalla truck costing, falling back to OSRM car if Valhalla fails or the trip is over its cap."""
+    if vehicle != 'truck':
+        return {**osrm(start, finish), 'routing': {'provider': 'osrm', 'profile': 'car', 'fallback': False}, 'calls': 1}
+    calls = 0
+    # ponytail: public server's 1,500 km cap; self-host Valhalla to route trucks coast to coast
+    if haversine(start['lat'], start['lon'], finish['lat'], finish['lon']) <= TRUCK_MAX_MILES:
+        calls = 1
+        try:
+            route = valhalla(start, finish)
+            return {**route, 'routing': {'provider': 'valhalla', 'profile': 'truck', 'fallback': False}, 'calls': 1}
+        except RoutingError:
+            pass
+    return {**osrm(start, finish), 'routing': {'provider': 'osrm', 'profile': 'car', 'fallback': True}, 'calls': calls + 1}
+
+
+def osrm(start, finish):
     # ponytail: public OSRM demo server, best-effort and 1 req/s; self-host OSRM or swap to OpenRouteService here
     url = f"{OSRM}{start['lon']},{start['lat']};{finish['lon']},{finish['lat']}"
     try:
@@ -171,6 +191,40 @@ def get_route(start, finish):
     route = data['routes'][0]
     return {'coords': route['geometry']['coordinates'], 'distance_miles': route['distance'] / 1609.344,
             'duration_hours': route['duration'] / 3600}
+
+
+def valhalla(start, finish):
+    body = {'locations': [{'lat': p['lat'], 'lon': p['lon']} for p in (start, finish)], 'costing': 'truck',
+            'costing_options': {'truck': TRUCK}, 'units': 'miles', 'directions_type': 'none'}
+    try:  # POST: the server rejects the same body as a GET ?json= param
+        data = http.post(VALHALLA, json=body, headers={'X-Client-Id': 'fuel-route-api'}, timeout=10).json()
+    except requests.RequestException as e:
+        raise RoutingError(f'truck routing unavailable: {e}') from e
+    if data.get('error_code') in NO_PATH:
+        raise NoRoute(data.get('error') or 'no route')
+    if 'trip' not in data:
+        raise RoutingError(data.get('error') or 'truck routing failed')
+    trip = data['trip']
+    return {'coords': polyline6(trip['legs'][0]['shape']), 'distance_miles': trip['summary']['length'],
+            'duration_hours': trip['summary']['time'] / 3600}
+
+
+def polyline6(s):
+    """Decode a Google encoded polyline at 1e-6 precision (Valhalla) into [lon, lat] pairs."""
+    out, i, ll = [], 0, [0, 0]
+    while i < len(s):
+        for k in (0, 1):
+            shift = n = 0
+            while True:
+                b = ord(s[i]) - 63
+                i += 1
+                n |= (b & 31) << shift
+                shift += 5
+                if b < 32:
+                    break
+            ll[k] += ~(n >> 1) if n & 1 else n >> 1
+        out.append([ll[1] / 1e6, ll[0] / 1e6])
+    return out
 
 
 @functools.cache

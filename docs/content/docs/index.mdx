@@ -26,6 +26,7 @@ Three choices carry the design:
   "finish": { "query": "Chicago, IL", "lat": 41.837, "lon": -87.6849 },
   "distance_miles": 961.0,
   "duration_hours": 17.0,
+  "routing": { "provider": "osrm", "profile": "car", "fallback": false },
   "fuel_stops": [
     { "mile": 161.6, "name": "EXTRA MILE TRUCK STOP", "address": "I-30 EXIT 208", "city": "Hooks",
       "state": "TX", "lat": 33.4707, "lon": -94.2865, "price": 2.817, "gallons": 16.1, "cost": 45.36 },
@@ -37,7 +38,7 @@ Three choices carry the design:
   "cost_of_fuel_consumed": 277.74,
   "stop_penalty": 15.0,
   "route": { "type": "LineString", "coordinates": [[-96.76642, 32.79325], "…"] },
-  "map_url": "https://<host>/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0",
+  "map_url": "https://<host>/api/route/map/?start=Dallas%2C+TX&finish=Chicago%2C+IL&stop_penalty=15.0&vehicle=car",
   "external_api_calls": 1
 }
 ```
@@ -47,6 +48,7 @@ Three choices carry the design:
 | `total_fuel_cost` | USD spent at stops. Starts from a full tank, so short trips report `0`. |
 | `cost_of_fuel_consumed` | Gallons burned over the whole trip × average price paid, or the cheapest corridor price when nothing is bought. `null` only if the corridor has no station at all. |
 | `stop_penalty` | USD per stop used to choose the stops (query parameter, default `15`). Not included in `total_fuel_cost`. |
+| `routing` | `{provider, profile, fallback}`. `vehicle=truck` routes with Valhalla truck costing; trips over 1,500 km straight-line, or a Valhalla failure, fall back to OSRM car (`fallback: true`). |
 | `external_api_calls` | `1` on a typical cold request, up to `3` with Nominatim fallbacks, `0` on a cache hit. |
 | `map_url` | An HTML map of the same trip. Reads the cache, so it adds no calls. |
 

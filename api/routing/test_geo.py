@@ -66,3 +66,9 @@ class StationsAlongTests(TestCase):
         self.assertEqual([s.name for _, s in got], ['S1', 'S0'])  # S2 is ~34 mi off the route
         self.assertAlmostEqual(got[0][0], 5.8, delta=1)
         self.assertAlmostEqual(got[1][0], 29.0, delta=1)
+
+
+class Polyline6Tests(SimpleTestCase):
+    def test_decode(self):  # Google's precision-5 example, so every coordinate reads 10x smaller at 1e-6
+        self.assertEqual(geo.polyline6('_p~iF~ps|U_ulLnnqC_mqNvxq`@'), [[-12.02, 3.85], [-12.095, 4.07], [-12.6453, 4.3252]])
+        self.assertEqual(geo.polyline6(''), [])
