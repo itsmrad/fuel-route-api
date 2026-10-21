@@ -79,6 +79,7 @@ async function planRoute(url: string): Promise<State> {
 const n0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const n1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const usdOrNa = (v: number | null) => (v == null ? 'n/a' : usd.format(v));
 
 function hours(h: number) {
   const whole = Math.floor(h);
@@ -282,7 +283,7 @@ function Result({
             {n0.format(ms)} ms round trip
           </span>
           <span className="text-fd-muted-foreground">
-            Fuel burned over the trip: <span className="tabular text-fd-foreground">{usd.format(plan.cost_of_fuel_consumed ?? 0)}</span>
+            Fuel burned over the trip: <span className="tabular text-fd-foreground">{usdOrNa(plan.cost_of_fuel_consumed)}</span>
           </span>
           <a
             href={plan.map_url}
@@ -302,7 +303,7 @@ function Result({
       {stops.length === 0 ? (
         <div className="rounded-2xl border px-4 py-4 text-sm text-fd-muted-foreground">
           No stops needed: {n0.format(plan.distance_miles)} miles fits in one 500-mile tank. The trip burns{' '}
-          {n1.format(plan.distance_miles / 10)} gallons, worth {usd.format(plan.cost_of_fuel_consumed ?? 0)} at the cheapest corridor price.
+          {n1.format(plan.distance_miles / 10)} gallons, worth {usdOrNa(plan.cost_of_fuel_consumed)} at the cheapest corridor price.
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border">
