@@ -1,0 +1,25 @@
+services:
+  api:
+    build: ./api
+    environment:
+      DEBUG: "0"
+      SECRET_KEY: dev-only-not-secret
+      ALLOWED_HOSTS: localhost,127.0.0.1,api
+    ports: ["${API_PORT:-8000}:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/openapi.yaml')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  docs:
+    build:
+      context: ./docs
+      additional_contexts:
+        api: ./api
+      args:
+        API_ORIGIN: http://api:8000
+    ports: ["${DOCS_PORT:-3000}:3000"]
+    depends_on:
+      api:
+        condition: service_healthy
