@@ -24,7 +24,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: light)" srcset=".github/assets/route-planner-light.webp">
-    <img alt="Route planner: New York to Los Angeles, 2,810 mi, 7 fuel stops, $702.79, served from cache in 49 ms" src=".github/assets/route-planner-dark.webp" width="900">
+    <img alt="Route planner: New York to Los Angeles, 2,810 mi, 7 fuel stops, $702.79, served from cache" src=".github/assets/route-planner-dark.webp" width="900">
   </picture>
 </p>
 
