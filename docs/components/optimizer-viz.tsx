@@ -26,7 +26,7 @@ type Step = {
   text: string;
 };
 
-/** Same rule as api/routing/optimizer.py, on miles of fuel instead of gallons. */
+/** Greedy rule, optimal when stops are free (stop_penalty=0). The API's DP in api/routing/optimizer.py also prices each stop. */
 export function planStops(stations: Station[], total = TOTAL, range = RANGE): Step[] {
   const pts = [...stations, { name: 'Finish', mile: total, price: 0 }];
   const steps: Step[] = [];
@@ -173,7 +173,8 @@ export function OptimizerViz() {
             <>
               Arrived. Bought <b className="tabular">{gallons.toFixed(1)} gal</b> for{' '}
               <b className="tabular text-fd-primary">${cost.toFixed(2)}</b>. Every gallon came from the cheapest station that could
-              still deliver it.
+              still deliver it. That is optimal when stops are free; the API also charges a per-stop penalty and solves
+              it with a DP.
             </>
           ) : (
             <>
