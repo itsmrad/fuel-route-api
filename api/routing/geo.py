@@ -13,8 +13,6 @@ import zipfile
 import requests
 from django.conf import settings
 from django.core.cache import cache
-from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
 
 from routing.models import Station
 
@@ -30,7 +28,8 @@ LSAD = re.compile(
 
 UA = {'User-Agent': 'fuel-route-api/1.0 (github.com/itsmrad/fuel-route-api)'}
 NOMINATIM = 'https://nominatim.openstreetmap.org/search'
-OSRM = 'https://router.project-osrm.org/route/v1/driving/'
+OSRM = ('https://router.project-osrm.org/route/v1/driving/',  # second host only if the first fails
+        'https://routing.openstreetmap.de/routed-car/route/v1/driving/')
 VALHALLA = 'https://valhalla1.openstreetmap.de/route'
 TRUCK = {'height': 4.11, 'width': 2.6, 'length': 21.64, 'weight': 36.3}  # Class 8 tractor-trailer: m, m, m, t
 TRUCK_MAX_MILES = 930  # FOSSGIS rejects truck routes over 1,500 km straight-line (error 154)
@@ -43,10 +42,11 @@ CITY_ST = re.compile(r'([^,]+?)\s*,\s*([A-Za-z]{2})')
 CELL = 0.5  # grid cell size, degrees
 MI_PER_DEG = 69.09
 
+# No retries: a second host beats retrying a slow one. Worst case per call is connect + one read gap = 8 s.
+# ponytail: read timeout is per socket read, a server trickling bytes can exceed it; stream with a deadline if seen
+TIMEOUT = (3, 5)
 http = requests.Session()  # keep-alive to OSRM/Nominatim saves a TLS handshake (~330 ms) per call
 http.headers.update(UA)
-http.mount('https://', HTTPAdapter(max_retries=Retry(
-    total=1, backoff_factor=1, status_forcelist=[429, 502, 503, 504], allowed_methods=['GET'])))
 nominatim_lock, nominatim_last = threading.Lock(), 0.0
 
 
@@ -149,7 +149,7 @@ def nominatim(q):
     with nominatim_lock:  # ponytail: per-process throttle, N workers can make N req/s; shared limiter if that bites
         time.sleep(max(0.0, nominatim_last + 1 - time.monotonic()))
         try:
-            r = http.get(NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'}, timeout=5)
+            r = http.get(NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'}, timeout=TIMEOUT)
             r.raise_for_status()
             hits = [{k: h[k] for k in ('lat', 'lon')} for h in r.json()[:1]]
         except requests.RequestException as e:
@@ -161,27 +161,35 @@ def nominatim(q):
 
 
 def get_route(start, finish, vehicle='car'):
-    """Route with coords as GeoJSON [lon, lat] pairs, plus 'routing' and the external 'calls' made.
-    truck: Valhalla truck costing, falling back to OSRM car if Valhalla fails or the trip is over its cap."""
-    if vehicle != 'truck':
-        return {**osrm(start, finish), 'routing': {'provider': 'osrm', 'profile': 'car', 'fallback': False}, 'calls': 1}
+    """Route with coords as GeoJSON [lon, lat] pairs, plus 'routing' and the external 'calls' made (at most 3).
+    truck: Valhalla truck costing, falling back to OSRM car if Valhalla fails or the trip is over its cap.
+    OSRM: the second host only if the first fails; fallback is true whenever the first choice wasn't used."""
     calls = 0
     # ponytail: public server's 1,500 km cap; self-host Valhalla to route trucks coast to coast
-    if haversine(start['lat'], start['lon'], finish['lat'], finish['lon']) <= TRUCK_MAX_MILES:
+    if vehicle == 'truck' and haversine(start['lat'], start['lon'], finish['lat'], finish['lon']) <= TRUCK_MAX_MILES:
         calls = 1
         try:
             route = valhalla(start, finish)
             return {**route, 'routing': {'provider': 'valhalla', 'profile': 'truck', 'fallback': False}, 'calls': 1}
         except RoutingError:
             pass
-    return {**osrm(start, finish), 'routing': {'provider': 'osrm', 'profile': 'car', 'fallback': True}, 'calls': calls + 1}
+    for host in OSRM:
+        calls += 1
+        try:
+            route = osrm(host, start, finish)
+        except RoutingError:
+            if host == OSRM[-1]:
+                raise
+            continue
+        fallback = vehicle == 'truck' or host != OSRM[0]
+        return {**route, 'routing': {'provider': 'osrm', 'profile': 'car', 'fallback': fallback}, 'calls': calls}
 
 
-def osrm(start, finish):
-    # ponytail: public OSRM demo server, best-effort and 1 req/s; self-host OSRM or swap to OpenRouteService here
-    url = f"{OSRM}{start['lon']},{start['lat']};{finish['lon']},{finish['lat']}"
-    try:
-        data = http.get(url, params={'overview': 'full', 'geometries': 'geojson'}, timeout=10).json()
+def osrm(host, start, finish):
+    # ponytail: public OSRM servers, best-effort and 1 req/s; self-host OSRM or swap to OpenRouteService here
+    url = f"{host}{start['lon']},{start['lat']};{finish['lon']},{finish['lat']}"
+    try:  # polyline6: 125 KB vs 818 KB of GeoJSON for Miami -> Seattle, the transfer was most of the latency
+        data = http.get(url, params={'overview': 'full', 'geometries': 'polyline6'}, timeout=TIMEOUT).json()
     except requests.RequestException as e:
         raise RoutingError(f'routing provider unavailable: {e}') from e
     if data.get('code') == 'NoRoute':
@@ -189,7 +197,7 @@ def osrm(start, finish):
     if data.get('code') != 'Ok' or not data.get('routes'):
         raise RoutingError(data.get('message') or f"no route ({data.get('code')})")
     route = data['routes'][0]
-    return {'coords': route['geometry']['coordinates'], 'distance_miles': route['distance'] / 1609.344,
+    return {'coords': polyline6(route['geometry']), 'distance_miles': route['distance'] / 1609.344,
             'duration_hours': route['duration'] / 3600}
 
 
@@ -197,7 +205,8 @@ def valhalla(start, finish):
     body = {'locations': [{'lat': p['lat'], 'lon': p['lon']} for p in (start, finish)], 'costing': 'truck',
             'costing_options': {'truck': TRUCK}, 'units': 'miles', 'directions_type': 'none'}
     try:  # POST: the server rejects the same body as a GET ?json= param
-        data = http.post(VALHALLA, json=body, headers={'X-Client-Id': 'fuel-route-api'}, timeout=10).json()
+        data = http.post(VALHALLA, json=body, headers={'X-Client-Id': 'fuel-route-api'},
+                         timeout=TIMEOUT).json()
     except requests.RequestException as e:
         raise RoutingError(f'truck routing unavailable: {e}') from e
     if data.get('error_code') in NO_PATH:
@@ -210,7 +219,7 @@ def valhalla(start, finish):
 
 
 def polyline6(s):
-    """Decode a Google encoded polyline at 1e-6 precision (Valhalla) into [lon, lat] pairs."""
+    """Decode a Google encoded polyline at 1e-6 precision (Valhalla, OSRM) into [lon, lat] pairs."""
     out, i, ll = [], 0, [0, 0]
     while i < len(s):
         for k in (0, 1):
