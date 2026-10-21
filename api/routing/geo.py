@@ -9,6 +9,7 @@ import time
 import unicodedata
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from django.conf import settings
@@ -42,12 +43,21 @@ CITY_ST = re.compile(r'([^,]+?)\s*,\s*([A-Za-z]{2})')
 CELL = 0.5  # grid cell size, degrees
 MI_PER_DEG = 69.09
 
-# No retries: a second host beats retrying a slow one. Worst case per call is connect + one read gap = 8 s.
-# ponytail: read timeout is per socket read, a server trickling bytes can exceed it; stream with a deadline if seen
-TIMEOUT = (3, 5)
+# No retries: a second host beats retrying a slow one. DEADLINE caps each call's wall clock, TIMEOUT
+# (connect, per-read) lets an abandoned call's thread finish soon after.
+TIMEOUT, DEADLINE = (3, 5), 8
 http = requests.Session()  # keep-alive to OSRM/Nominatim saves a TLS handshake (~330 ms) per call
 http.headers.update(UA)
+pool = ThreadPoolExecutor(8)
 nominatim_lock, nominatim_last = threading.Lock(), 0.0
+
+
+def call(send, url, **kw):
+    """send(url, **kw), e.g. http.get, given up after DEADLINE s even if the server trickles bytes."""
+    try:
+        return pool.submit(send, url, timeout=TIMEOUT, **kw).result(DEADLINE)
+    except TimeoutError:
+        raise requests.Timeout(f'no response in {DEADLINE} s') from None
 
 
 class RoutingError(Exception):
@@ -149,7 +159,7 @@ def nominatim(q):
     with nominatim_lock:  # ponytail: per-process throttle, N workers can make N req/s; shared limiter if that bites
         time.sleep(max(0.0, nominatim_last + 1 - time.monotonic()))
         try:
-            r = http.get(NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'}, timeout=TIMEOUT)
+            r = call(http.get, NOMINATIM, params={'q': q, 'countrycodes': 'us', 'limit': 1, 'format': 'json'})
             r.raise_for_status()
             hits = [{k: h[k] for k in ('lat', 'lon')} for h in r.json()[:1]]
         except requests.RequestException as e:
@@ -189,7 +199,7 @@ def osrm(host, start, finish):
     # ponytail: public OSRM servers, best-effort and 1 req/s; self-host OSRM or swap to OpenRouteService here
     url = f"{host}{start['lon']},{start['lat']};{finish['lon']},{finish['lat']}"
     try:  # polyline6: 125 KB vs 818 KB of GeoJSON for Miami -> Seattle, the transfer was most of the latency
-        data = http.get(url, params={'overview': 'full', 'geometries': 'polyline6'}, timeout=TIMEOUT).json()
+        data = call(http.get, url, params={'overview': 'full', 'geometries': 'polyline6'}).json()
     except requests.RequestException as e:
         raise RoutingError(f'routing provider unavailable: {e}') from e
     if data.get('code') == 'NoRoute':
@@ -197,7 +207,11 @@ def osrm(host, start, finish):
     if data.get('code') != 'Ok' or not data.get('routes'):
         raise RoutingError(data.get('message') or f"no route ({data.get('code')})")
     route = data['routes'][0]
-    return {'coords': polyline6(route['geometry']), 'distance_miles': route['distance'] / 1609.344,
+    try:
+        coords = polyline6(route['geometry'])
+    except IndexError as e:
+        raise RoutingError('invalid route geometry') from e
+    return {'coords': coords, 'distance_miles': route['distance'] / 1609.344,
             'duration_hours': route['duration'] / 3600}
 
 
@@ -205,8 +219,7 @@ def valhalla(start, finish):
     body = {'locations': [{'lat': p['lat'], 'lon': p['lon']} for p in (start, finish)], 'costing': 'truck',
             'costing_options': {'truck': TRUCK}, 'units': 'miles', 'directions_type': 'none'}
     try:  # POST: the server rejects the same body as a GET ?json= param
-        data = http.post(VALHALLA, json=body, headers={'X-Client-Id': 'fuel-route-api'},
-                         timeout=TIMEOUT).json()
+        data = call(http.post, VALHALLA, json=body, headers={'X-Client-Id': 'fuel-route-api'}).json()
     except requests.RequestException as e:
         raise RoutingError(f'truck routing unavailable: {e}') from e
     if data.get('error_code') in NO_PATH:

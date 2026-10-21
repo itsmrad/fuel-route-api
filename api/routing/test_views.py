@@ -173,7 +173,8 @@ class RouteApiTests(TestCase):
         self.assertEqual((r.status_code, calls), (502, 3))  # worst case: Valhalla + both OSRM hosts
 
     def test_second_osrm_host_on_failure(self, *_):
-        for primary in (requests.ReadTimeout('slow'), {'code': 'TooBig', 'message': 'busy'}):
+        for primary in (requests.ReadTimeout('slow'), {'code': 'TooBig', 'message': 'busy'},
+                        {'code': 'Ok', 'routes': [{'geometry': '?', 'distance': 1, 'duration': 1}]}):
             cache.clear()
             r, get = self.get(osrm=[primary, OSRM_OK])
             body = r.json()

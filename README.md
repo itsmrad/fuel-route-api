@@ -78,7 +78,7 @@ Assumption: the truck starts with a full tank, so `total_fuel_cost` is fuel boug
 ## How it works
 
 1. **Resolve** start and finish: Census table or `lat,lon` locally (0 calls), else Nominatim (+1 each).
-2. **Route** with OSRM `/route/v1/driving`: 1 call, full geometry. `vehicle=truck`: Valhalla `costing=truck` (Class 8: 4.11 m, 2.6 m, 21.64 m, 36.3 t); on failure or over the public server's 1,500 km cap, OSRM car with `routing.fallback: true`. OSRM demo server down or slow: one call to the FOSSGIS OSRM server (`fallback: true`). No retries; each call caps at 3 s connect + 5 s read, so a dead provider costs at most 8 s.
+2. **Route** with OSRM `/route/v1/driving`: 1 call, full geometry. `vehicle=truck`: Valhalla `costing=truck` (Class 8: 4.11 m, 2.6 m, 21.64 m, 36.3 t); on failure or over the public server's 1,500 km cap, OSRM car with `routing.fallback: true`. OSRM demo server down or slow: one call to the FOSSGIS OSRM server (`fallback: true`). No retries; each call is cut off after 8 s wall clock, so a dead or slow provider costs at most 8 s.
 3. **Corridor match**: in-memory 0.5° grid index keeps stations within 10 mi of the polyline, each with a mile marker.
 4. **Optimize** stops (below).
 5. **Respond**. The route (distance, line, corridor) is cached on the vehicle and resolved coordinates, so another spelling or `stop_penalty` re-runs only the optimizer; the map page reads the same entry.
@@ -115,7 +115,7 @@ The CSV has no coordinates and addresses like `I-44, EXIT 283 & US-69`. `load_st
 ## Tests
 
 ```bash
-cd api && uv run python manage.py test   # 35 tests, no network (OSRM/Valhalla mocked)
+cd api && uv run python manage.py test   # 36 tests, no network (OSRM/Valhalla mocked)
 ```
 
 Optimizer cases (cheap-ahead, fill-up, short trip, unreachable gap, exact cents, DP vs brute force), geocoding, and the endpoint (asserts 1 external call, then 0 on repeat).
