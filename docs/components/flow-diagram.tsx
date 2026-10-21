@@ -11,7 +11,7 @@ const boxes: Box[] = [
   { x: 518, y: ROW1, w: 122, title: 'Cache', sub: 'file · per trip' },
   { x: 674, y: ROW1, w: 118, title: 'JSON', sub: '+ map_url' },
   { x: 8, y: ROW2, w: 170, title: 'resolve()', sub: 'Census table', external: false },
-  { x: 214, y: ROW2, w: 170, title: 'OSRM /route', sub: '1 call · ~1.5 s', external: true },
+  { x: 214, y: ROW2, w: 170, title: 'OSRM / Valhalla', sub: '1 call · 0.6–2.3 s', external: true },
   { x: 420, y: ROW2, w: 170, title: 'stations_along()', sub: 'grid index · 18–30 ms' },
   { x: 626, y: ROW2, w: 166, title: 'optimizer', sub: 'DP · ~20 ms' },
 ];
@@ -68,7 +68,7 @@ export function FlowDiagram() {
       <svg viewBox="0 0 800 260" className="min-w-[680px] w-full text-fd-foreground" role="img" aria-labelledby="flow-title">
         <title id="flow-title">
           Request flow: client to Caddy to the Django view; a cache hit returns JSON with zero external calls; a miss resolves
-          locations, calls OSRM once, finds stations along the route, runs the optimizer and caches the result.
+          locations, calls the router (OSRM or Valhalla) once, finds stations along the route, runs the optimizer and caches the result.
         </title>
         <defs>
           {[
