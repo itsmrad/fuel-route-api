@@ -69,7 +69,8 @@ DOCS_URL=$(deploy fuel-route-docs "$DOCS_IMAGE" --memory-size 1024 \
   --environment "Variables={API_ORIGIN=${API_URL%/},AWS_LWA_PORT=3000}")
 
 # The first cold start after a deploy lazy-loads the image (~14 s); take it here, not on a reviewer's first click.
-curl -s -o /dev/null "${DOCS_URL}api/route/?start=Dallas,%20TX&finish=Chicago,%20IL"
+# -f doubles as a smoke test: the script fails if the live site can't plan a route.
+curl -sf -o /dev/null "${DOCS_URL}api/route/?start=Dallas,%20TX&finish=Chicago,%20IL"
 
 echo "API:  ${API_URL}api/route/?start=Dallas,%20TX&finish=Chicago,%20IL"
 echo "Docs: ${DOCS_URL}docs"
