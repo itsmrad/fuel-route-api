@@ -7,7 +7,7 @@ icon: Server
 | Piece | Choice |
 | --- | --- |
 | Host | AWS Lambda, `ap-south-1`, arm64 (Graviton), container images in ECR |
-| API | `api/Dockerfile` as-is: gunicorn on `:8000`, 2048 MB, 30 s timeout |
+| API | `api/Dockerfile` as-is: gunicorn on `:8000` with 1 worker × 4 threads, 3008 MB, 30 s timeout |
 | Docs | `docs/Dockerfile` as-is: Next.js standalone on `:3000`, 1024 MB |
 | HTTPS | Lambda Function URLs (`AuthType NONE`), no API Gateway, no domain |
 | Glue | [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), one `COPY` line per Dockerfile |
@@ -33,10 +33,12 @@ Environment set on the API function:
 | `CACHE_DIR` | `/tmp/cache`, the only writable path on Lambda |
 | `AWS_LWA_PORT`, `AWS_LWA_READINESS_CHECK_PATH` | `8000`, `/api/openapi.yaml` |
 
+The function also overrides the image's command to run 1 gunicorn worker instead of 2: Lambda sends one request at a time to an instance, so a second worker only doubles the boot work. 3008 MB is for CPU, not memory (it peaks around 250 MB): Lambda scales CPU with memory, and the warm-up (Django setup plus the city index, about 1 s on a laptop) is CPU-bound.
+
 ## What changes on Lambda
 
 - **The cache is per instance.** Each execution environment has its own `/tmp`, and it goes away when the instance is recycled. A repeat request hits the cache only if it lands on a warm instance that served it before. At demo traffic that's usually the case; at scale, move the cache to DynamoDB or ElastiCache.
-- **Cold starts.** A new instance boots gunicorn and Django, and builds the city index on first use. Warm requests match the [benchmarks](/docs/benchmarks).
+- **Cold starts.** A new API instance spends about 1.6 s in init (gunicorn, Django, city index). Measured from India against `ap-south-1`: a new route with both functions cold took 5.9 s, a cached route on warm instances 0.6 s (mostly two Function URL hops and a ~100 KB body). The very first cold start after a deploy also lazy-loads the image (about 14 s), so `deploy/lambda.sh` ends by making that request itself.
 - **SQLite is read-only.** It's baked into the image, and no request writes to it.
 - **No rate limit on the URL.** The public OSRM server allows about 1 request per second. Account concurrency (10 on a new account) caps the blast radius; add API Gateway throttling if the URL is shared widely.
 

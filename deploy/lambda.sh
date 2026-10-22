@@ -22,9 +22,9 @@ if ! ROLE_ARN=$($AWS iam get-role --role-name $ROLE --query Role.Arn --output te
   sleep 10  # a brand-new role isn't assumable by Lambda straight away
 fi
 
-# deploy NAME IMAGE MEMORY_MB ENV_JSON -> prints the Function URL
+# deploy NAME IMAGE CONFIG_ARGS... -> prints the Function URL. CONFIG_ARGS apply on create and on every update.
 deploy() {
-  local name=$1 image=$2 memory=$3 env=$4
+  local name=$1 image=$2; shift 2
   $AWS ecr describe-repositories --repository-names "$name" >/dev/null 2>&1 ||
     $AWS ecr create-repository --repository-name "$name" >/dev/null
   docker push -q "$image" >/dev/null
@@ -32,12 +32,12 @@ deploy() {
   if $AWS lambda get-function --function-name "$name" >/dev/null 2>&1; then
     $AWS lambda update-function-code --function-name "$name" --image-uri "$image" >/dev/null
     $AWS lambda wait function-updated-v2 --function-name "$name"
-    $AWS lambda update-function-configuration --function-name "$name" --environment "$env" >/dev/null
+    $AWS lambda update-function-configuration --function-name "$name" --timeout 30 "$@" >/dev/null
   else
     $AWS logs create-log-group --log-group-name "/aws/lambda/$name" 2>/dev/null || true
     $AWS logs put-retention-policy --log-group-name "/aws/lambda/$name" --retention-in-days 7
     $AWS lambda create-function --function-name "$name" --package-type Image --code ImageUri="$image" \
-      --role "$ROLE_ARN" --architectures arm64 --memory-size "$memory" --timeout 30 --environment "$env" >/dev/null
+      --role "$ROLE_ARN" --architectures arm64 --timeout 30 "$@" >/dev/null
     $AWS lambda wait function-active-v2 --function-name "$name"
     $AWS lambda create-function-url-config --function-name "$name" --auth-type NONE >/dev/null
     # Public URL: both permissions are required for AuthType NONE.
@@ -53,9 +53,11 @@ deploy() {
 # Lambda rejects multi-manifest images, hence --provenance=false.
 API_IMAGE=$REGISTRY/fuel-route-api:$TAG
 docker build --platform linux/arm64 --provenance=false -t "$API_IMAGE" api
-API_URL=$(deploy fuel-route-api "$API_IMAGE" 2048 "Variables={DEBUG=0,SECRET_KEY=$(openssl rand -hex 32),\
-ALLOWED_HOSTS=.lambda-url.$REGION.on.aws\,127.0.0.1,CACHE_DIR=/tmp/cache,\
-AWS_LWA_PORT=8000,AWS_LWA_READINESS_CHECK_PATH=/api/openapi.yaml}")
+# Lambda sends one request at a time per instance: 1 worker boots twice as fast as the image's 2.
+API_URL=$(deploy fuel-route-api "$API_IMAGE" --memory-size 3008 \
+  --image-config '{"Command":["gunicorn","config.wsgi","-b","0.0.0.0:8000","-w","1","--threads","4","-k","gthread","--access-logfile","-"]}' \
+  --environment "Variables={DEBUG=0,SECRET_KEY=$(openssl rand -hex 32),ALLOWED_HOSTS=.lambda-url.$REGION.on.aws\,127.0.0.1,\
+CACHE_DIR=/tmp/cache,AWS_LWA_PORT=8000,AWS_LWA_READINESS_CHECK_PATH=/api/openapi.yaml}")
 
 # The docs site proxies /api/* to the API (docs/app/api/[...path]/route.ts reads API_ORIGIN per request).
 # SITE_URL is only known once the docs function exists, so the first deploy's OG images point at localhost.
@@ -63,7 +65,11 @@ SITE_URL=$($AWS lambda get-function-url-config --function-name fuel-route-docs -
 DOCS_IMAGE=$REGISTRY/fuel-route-docs:$TAG
 docker build --platform linux/arm64 --provenance=false -t "$DOCS_IMAGE" --build-context api=api \
   --build-arg SITE_URL="${SITE_URL%/}" docs
-DOCS_URL=$(deploy fuel-route-docs "$DOCS_IMAGE" 1024 "Variables={API_ORIGIN=${API_URL%/},AWS_LWA_PORT=3000}")
+DOCS_URL=$(deploy fuel-route-docs "$DOCS_IMAGE" --memory-size 1024 \
+  --environment "Variables={API_ORIGIN=${API_URL%/},AWS_LWA_PORT=3000}")
+
+# The first cold start after a deploy lazy-loads the image (~14 s); take it here, not on a reviewer's first click.
+curl -s -o /dev/null "${DOCS_URL}api/route/?start=Dallas,%20TX&finish=Chicago,%20IL"
 
 echo "API:  ${API_URL}api/route/?start=Dallas,%20TX&finish=Chicago,%20IL"
 echo "Docs: ${DOCS_URL}docs"

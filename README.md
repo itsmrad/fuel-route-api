@@ -28,7 +28,8 @@
   </picture>
 </p>
 
-> **Live demo:** (added after deployment). Until then, run it locally with `docker compose up` and open http://localhost:3000/docs.
+> **Live demo:** [docs + route planner](https://42qr3jkeqhp24fcj4mro7ps36u0pnoan.lambda-url.ap-south-1.on.aws/docs/route-planner) · [API: Dallas → Chicago](https://42qr3jkeqhp24fcj4mro7ps36u0pnoan.lambda-url.ap-south-1.on.aws/api/route/?start=Dallas,%20TX&finish=Chicago,%20IL) · [map](https://42qr3jkeqhp24fcj4mro7ps36u0pnoan.lambda-url.ap-south-1.on.aws/api/route/map/?start=Dallas,%20TX&finish=Chicago,%20IL)<br>
+> Hosted on AWS Lambda (`ap-south-1`). The first request after a few idle minutes is a cold start and takes a few seconds; after that it's fast. [Deployment](docs/content/docs/deployment.mdx)
 
 ## Results at a glance
 
@@ -175,6 +176,8 @@ api/                         Django project (uv)
   data/                      fuel-prices.csv, station_coords.csv
   openapi.yaml               OpenAPI 3.1 spec
 docs/                        Fumadocs site: guides, route planner, API reference
+  app/api/[...path]/route.ts proxies /api/* to Django (one origin, no CORS)
+deploy/lambda.sh             builds both images, deploys them as AWS Lambdas
 postman_collection.json      12 requests with assertions
 compose.yaml                 docker compose up → :3000 + :8000
 ```
@@ -186,11 +189,11 @@ compose.yaml                 docker compose up → :3000 + :8000
 - **Truck routing is opt-in:** public Valhalla caps trips at 1,500 km, so coast-to-coast falls back to OSRM car. Self-hosted Valhalla would make `truck` the default.
 - **Sparse West Coast data:** only 8 California stations, so NYC → LA has no station for its last ~273 mi (still within range).
 - **Fixed assumptions:** 500 mi, 10 MPG, full tank at start, price snapshot. `range`, `mpg` and `start_fuel` parameters and a scheduled price refresh are straightforward additions.
-- **Single box:** file cache and in-memory index; Redis and PostGIS when there is more than one box or many more stations.
+- **Per-instance cache on Lambda:** each instance keeps its own `/tmp` file cache and in-memory index, so a cache hit needs a warm instance that has seen the route. DynamoDB or Redis for a shared cache, and PostGIS when there are many more stations.
 
 ## Further reading
 
-Docs site: run locally at http://localhost:3000/docs. Source pages:
+Docs site: [live](https://42qr3jkeqhp24fcj4mro7ps36u0pnoan.lambda-url.ap-south-1.on.aws/docs), or locally at http://localhost:3000/docs. Source pages:
 [Overview](docs/content/docs/index.mdx) ·
 [Quickstart](docs/content/docs/quickstart.mdx) ·
 [Architecture](docs/content/docs/architecture.mdx) ·
