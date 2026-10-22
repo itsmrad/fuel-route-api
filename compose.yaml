@@ -17,8 +17,8 @@ services:
       context: ./docs
       additional_contexts:
         api: ./api
-      args:
-        API_ORIGIN: http://api:8000
+    environment:
+      API_ORIGIN: http://api:8000  # read per request by docs/app/api/[...path]/route.ts
     ports: ["${DOCS_PORT:-3000}:3000"]
     depends_on:
       api:

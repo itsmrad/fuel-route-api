@@ -149,7 +149,7 @@ Twenty decisions across 19 merged pull requests, in the order they were made. Ea
 | Hosted docs (Mintlify, GitBook) | Account, and the docs leave the repo. |
 | **Fumadocs on Next.js 16** | Chosen. MDX guides, generated API reference with a playground, custom React for the planner. |
 
-**Decision.** The API reference is generated from `api/openapi.yaml` (fumadocs-openapi). The route planner uses MapLibre with OpenFreeMap tiles (no key). Next rewrites `/api/*` to Django, so the browser stays on one origin and the API needs no CORS; Fumadocs search moved to `/search` so the proxy can own all of `/api/*`. A Postman collection covers the same contract.
+**Decision.** The API reference is generated from `api/openapi.yaml` (fumadocs-openapi). The route planner uses MapLibre with OpenFreeMap tiles (no key). A Next Route Handler proxies `/api/*` to Django, so the browser stays on one origin and the API needs no CORS; Fumadocs search moved to `/search` so the proxy can own all of `/api/*`. A Postman collection covers the same contract.
 
 **Result.** **A contract that is tried, not only described**, measured by 12 Postman requests with 48 of 48 assertions passing under newman, by generating the reference from the same spec Django serves. [PR #7](https://github.com/itsmrad/fuel-route-api/pull/7), [PR #9](https://github.com/itsmrad/fuel-route-api/pull/9)
 

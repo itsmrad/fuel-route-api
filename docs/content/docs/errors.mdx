@@ -63,4 +63,4 @@ curl -s 'http://127.0.0.1:8000/api/route/?start=Springfeld,%20ZZ&finish=Chicago,
 
 ## From the docs site
 
-When the route planner or the API playground gets no JSON back at all (Django not running, wrong `API_ORIGIN`), the Next.js proxy answers with a `500` HTML page. The planner reports that as "The API isn't running" with the command to start it.
+When the route planner or the API playground gets no JSON back at all (Django not running, wrong `API_ORIGIN`), the docs site's `/api/*` proxy answers with a plain-text `502`. The planner reports that as "The API isn't running" with the command to start it.

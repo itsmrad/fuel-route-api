@@ -70,7 +70,7 @@ async function planRoute(url: string): Promise<State> {
   if (res.ok && body) return { phase: 'done', url, plan: body as RoutePlan, ms, status: res.status };
 
   const status = res.status;
-  // The Next.js proxy answers 500/502/504 with HTML when nothing listens on API_ORIGIN.
+  // The /api proxy (app/api/[...path]/route.ts) answers a plain-text 502 when nothing listens on API_ORIGIN.
   if (!body) return { phase: 'error', url, ms, problem: { kind: status === 404 ? 'unknown' : 'offline', status } };
   const kind = status === 400 ? 'bad-input' : status === 422 ? 'unreachable' : status === 502 ? 'upstream' : 'unknown';
   return { phase: 'error', url, ms, problem: { kind, status, body: body as ApiError } };

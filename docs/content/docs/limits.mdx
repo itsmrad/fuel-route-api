@@ -13,7 +13,7 @@ Each shortcut is deliberate: it keeps the system to one process, one dependency 
 | **Truck routing capped at 1,500 km** | The public Valhalla server rejects longer `vehicle=truck` trips (NYC → LA, Miami → Seattle), so they fall back to OSRM car routes that may use truck-restricted roads. | Self-hosted Valhalla with a US extract lifts the cap; then `truck` can be the default. |
 | **Sparse data in the West** | Only 8 California stations, all near the Mexican border. NYC → LA has no station for its last ~273 miles. | A fuller price feed. The optimizer needs no change. |
 | **Price snapshot** | Prices never update on their own. | Scheduled `load_stations` against a live feed. |
-| **File cache** (`api/.cache/`, `CACHE_DIR`) | Local to one server. | Redis or Memcached when there is more than one box. |
+| **File cache** (`api/.cache/`, `CACHE_DIR`) | Local to one server; on Lambda, to one instance's `/tmp`. | DynamoDB, Redis or Memcached when hits must survive instance churn. |
 | **Grid index in memory** | Fine for 6.4k points, rebuilt per worker. | PostGIS with a GiST index past a few hundred thousand stations. |
 | **Single vehicle profile** | 500-mile range and 10 MPG are fixed. | Accept `range` and `mpg` as query parameters. |
 | **Full tank at start** | Trips under 500 miles report `total_fuel_cost: 0`. | `cost_of_fuel_consumed` covers it today; a `start_fuel` parameter would make it explicit. |
