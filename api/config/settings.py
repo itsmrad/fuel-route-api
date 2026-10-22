@@ -46,7 +46,7 @@ CACHES = {
     }
 }
 
-# Behind Caddy / the Next.js proxy: build map_url from the client-facing scheme and host.
+# Behind the Next.js proxy / Function URL: build map_url from the client-facing scheme and host.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 

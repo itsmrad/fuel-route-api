@@ -1,87 +1,45 @@
 ---
 title: Deployment
-description: One Lightsail instance, Caddy in front, two systemd units behind it.
+description: Two container Lambdas with public Function URLs, deployed by one script.
 icon: Server
 ---
 
 | Piece | Choice |
 | --- | --- |
-| Host | AWS Lightsail, Ubuntu 24.04, smallest plan, static IP, ports 80 and 443 open |
-| TLS + routing | Caddy, automatic HTTPS. No domain? `<ip>.sslip.io` still gets a valid certificate. |
-| API | gunicorn on `127.0.0.1:8000`, run by uv |
-| Docs | `next start` on `127.0.0.1:3000` |
+| Host | AWS Lambda, `ap-south-1`, arm64 (Graviton), container images in ECR |
+| API | `api/Dockerfile` as-is: gunicorn on `:8000`, 2048 MB, 30 s timeout |
+| Docs | `docs/Dockerfile` as-is: Next.js standalone on `:3000`, 1024 MB |
+| HTTPS | Lambda Function URLs (`AuthType NONE`), no API Gateway, no domain |
+| Glue | [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), one `COPY` line per Dockerfile |
 
-Caddy splits by path, so the browser sees a single origin and the API needs no CORS.
+The Web Adapter is a Lambda extension: it turns each invoke into an HTTP request to the server already in the image, so the same images run under `docker compose` and on Lambda with no handler code. Outside Lambda it never starts.
 
-```txt title="deploy/Caddyfile"
-{$DOMAIN} {
-	encode zstd gzip
+The browser only talks to the docs origin. A Route Handler (`docs/app/api/[...path]/route.ts`) proxies `/api/*` to the API's Function URL (`API_ORIGIN`, a runtime env var), so the API needs no CORS, and `map_url` is built from the forwarded docs host. It's a handler rather than a `next.config` rewrite because a rewrite passes the API's `x-amzn-*` response headers through, and a Function URL answers `502` to a response that carries them.
 
-	handle /api/* {
-		reverse_proxy 127.0.0.1:8000
-	}
-	handle {
-		reverse_proxy 127.0.0.1:3000
-	}
-}
+## Deploying
+
+```bash
+AWS=aws2 ./deploy/lambda.sh   # AWS defaults to "aws"
 ```
 
-<Callout title="Protect the OSRM quota">
-The public OSRM server allows about 1 request per second. Add a per-IP rate limit on `/api/route/` in Caddy so one client can't burn it for everyone. Cache hits never reach OSRM.
-</Callout>
+[`deploy/lambda.sh`](https://github.com/itsmrad/fuel-route-api/blob/main/deploy/lambda.sh) is re-runnable. The first run creates the ECR repos, an execution role with only `AWSLambdaBasicExecutionRole`, both functions, their Function URLs, and 7-day log groups. Later runs push new images tagged with the commit hash. The API goes first because the docs function needs its URL.
 
-## systemd units
+Environment set on the API function:
 
-```ini title="/etc/systemd/system/fuel-api.service"
-[Unit]
-Description=Fuel Route API (gunicorn)
-After=network.target
+| Variable | Value |
+| --- | --- |
+| `SECRET_KEY` | random per deploy (no sessions, nothing signed that outlives a deploy) |
+| `ALLOWED_HOSTS` | `.lambda-url.ap-south-1.on.aws,127.0.0.1` (the adapter's readiness check uses `127.0.0.1`) |
+| `CACHE_DIR` | `/tmp/cache`, the only writable path on Lambda |
+| `AWS_LWA_PORT`, `AWS_LWA_READINESS_CHECK_PATH` | `8000`, `/api/openapi.yaml` |
 
-[Service]
-User=ubuntu
-WorkingDirectory=/srv/fuel-route-api/api
-EnvironmentFile=/srv/fuel-route-api/.env
-ExecStart=/home/ubuntu/.local/bin/uv run gunicorn config.wsgi -w 2 --threads 4 -k gthread -b 127.0.0.1:8000
-Restart=on-failure
+## What changes on Lambda
 
-[Install]
-WantedBy=multi-user.target
-```
+- **The cache is per instance.** Each execution environment has its own `/tmp`, and it goes away when the instance is recycled. A repeat request hits the cache only if it lands on a warm instance that served it before. At demo traffic that's usually the case; at scale, move the cache to DynamoDB or ElastiCache.
+- **Cold starts.** A new instance boots gunicorn and Django, and builds the city index on first use. Warm requests match the [benchmarks](/docs/benchmarks).
+- **SQLite is read-only.** It's baked into the image, and no request writes to it.
+- **No rate limit on the URL.** The public OSRM server allows about 1 request per second. Account concurrency (10 on a new account) caps the blast radius; add API Gateway throttling if the URL is shared widely.
 
-```ini title="/etc/systemd/system/fuel-docs.service"
-[Unit]
-Description=Fuel Route API docs (Next.js)
-After=network.target
+## Cost
 
-[Service]
-User=ubuntu
-WorkingDirectory=/srv/fuel-route-api/docs
-Environment=NODE_ENV=production
-ExecStart=/usr/bin/npm run start -- -p 3000
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-gunicorn runs with the Docker image's flags, 2 workers × 4 threads (`gthread`): a cold request spends most of its time waiting on OSRM, so threads beat extra processes, and both workers share the file cache.
-
-The `.env` file sets `SECRET_KEY` and `ALLOWED_HOSTS`. `DEBUG` is off unless set; `manage.py` turns it on for local `runserver`/`test`, gunicorn never does. Nothing secret lives in the repo.
-
-## Deploying a change
-
-```bash title="deploy/deploy.sh"
-set -euo pipefail
-cd /srv/fuel-route-api && git pull --ff-only
-
-cd api
-uv sync --frozen
-uv run python manage.py migrate --noinput
-
-cd ../docs
-npm ci && SITE_URL="https://$DOMAIN" npm run build   # absolute Open Graph image URLs
-
-sudo systemctl restart fuel-api fuel-docs
-```
-
-`load_stations` runs once on a fresh box, and again only when the price CSV changes.
+At demo traffic it's effectively free: Lambda bills per request and per GB-second, and the free tier covers 1M requests and 400,000 GB-s a month. The only standing charge is ECR storage for the images (about $0.10/GB-month). To tear everything down, delete the two functions, the two ECR repos, the `fuel-route-lambda` role and the `/aws/lambda/fuel-route-*` log groups.

@@ -8,7 +8,7 @@ const mono = Overpass_Mono({ subsets: ['latin'], variable: '--font-overpass-mono
 
 export const metadata: Metadata = {
   // Absolute OG image URLs; set SITE_URL at build time in production.
-  metadataBase: new URL(process.env.SITE_URL ?? 'http://localhost:3000'),
+  metadataBase: new URL(process.env.SITE_URL || 'http://localhost:3000'),
   title: { template: '%s · Fuel Route API', default: 'Fuel Route API Docs' },
   description: 'Cost-optimal fuel stops along any US driving route.',
   twitter: { card: 'summary_large_image' },

@@ -6,12 +6,14 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 # The API reference is generated from ../api/openapi.yaml (compose passes ./api as the "api" context).
 COPY --from=api openapi.yaml /app/api/openapi.yaml
 COPY . .
-# Rewrites to the API are baked into the build output, so the target is a build arg.
-ARG API_ORIGIN=http://api:8000
+# Absolute Open Graph image URLs (app/layout.tsx); localhost when unset.
+ARG SITE_URL
 RUN npm run build
 
 # Standalone output: server.js plus only the traced node_modules.
 FROM node:24-slim
+# Lambda Web Adapter: lets this image run as-is on AWS Lambda (an extension, inert under docker compose).
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app/docs
 # lib/openapi.ts resolves ../api/openapi.yaml from the cwd if a page renders on demand.

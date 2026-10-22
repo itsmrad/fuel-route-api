@@ -1,5 +1,7 @@
 FROM python:3.14-slim
 COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/
+# Lambda Web Adapter: lets this image run as-is on AWS Lambda (an extension, inert under docker compose).
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
 
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0 PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
